@@ -1,0 +1,6 @@
+swt
+*.o
+xdg-shell-protocol.c
+xdg-shell-protocol.h
+.cache/
+compile_commands.json

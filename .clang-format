@@ -1,0 +1,18 @@
+BasedOnStyle: LLVM
+IndentWidth: 8
+UseTab: ForContinuationAndIndentation
+BreakBeforeBraces: Linux
+AllowShortIfStatementsOnASingleLine: true
+IndentCaseLabels: false
+AlignConsecutiveMacros: true
+AlignConsecutiveAssignments: true
+AlignConsecutiveBitFields: true
+AlignConsecutiveShortCaseStatements:
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
+  AlignCaseColons: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AlignOperands: AlignAfterOperator
+AlignArrayOfStructures: Left
