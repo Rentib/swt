@@ -1,4 +1,5 @@
 /* See LICENSE for license details. */
+
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -2409,6 +2410,19 @@ int twrite(const char *buf, int buflen, int show_ctrl)
 		tputc(u);
 	}
 	return n;
+}
+
+void tfree(void)
+{
+	int i;
+	for (i = 0; i <= term.c.y; i++) {
+		free(term.line[i]);
+		free(term.alt[i]);
+	}
+	for (; i < term.row; i++) {
+		free(term.line[i]);
+		free(term.alt[i]);
+	}
 }
 
 void tresize(int col, int row)

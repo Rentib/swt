@@ -5,11 +5,10 @@
  *
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
-static const char *font    = "IosevkaTermNerdFontMono";
-static const int font_size = 14;
-static const int antialias = 1;
-static const int autohint  = 1;
-static const int borderpx  = 2;
+static const char *font =
+    "IosevkaTermNerdFontMono:antialias=true:autohint=true";
+static const int fontsize = 14;
+static const int borderpx = 2;
 
 /*
  * What program is execed by st depends of these precedence rules:
@@ -48,13 +47,12 @@ static const unsigned int tripleclicktimeout = 600;
 #endif
 
 /* alt screens */
-const int allowaltscreen = 1;
+int allowaltscreen = 1;
 
 /* allow certain non-interactive (insecure) window operations such as:
    setting the clipboard text */
 const int allowwindowops = 0;
 
-#if 0 /* TODO */
 /*
  * draw latency range in ms - from new content/keypress/etc until drawing.
  * within this range, st draws when content stops arriving (idle). mostly it's
@@ -63,15 +61,12 @@ const int allowwindowops = 0;
  */
 static const double minlatency = 2;
 static const double maxlatency = 33;
-#endif
 
-#if 0 /* TODO */
 /*
  * blinking timeout (set to 0 to disable blinking) for the terminal blinking
  * attribute.
  */
 static const unsigned int blinktimeout = 800;
-#endif
 
 /*
  * thickness of underline and bar cursors
@@ -179,7 +174,7 @@ static const unsigned int defaultrcs = 0;
  * 2: Block ("█")
  * 4: Underline ("_")
  * 6: Bar ("|")
- * 7: Snowman ("☃")
+ * 7: Snowman ("☃"), actually there is no snowman
  */
 static const unsigned int cursorshape = 2;
 
@@ -187,8 +182,8 @@ static const unsigned int cursorshape = 2;
  * Default columns and rows numbers
  */
 
-static const unsigned int cols = 80;
-static const unsigned int rows = 24;
+static unsigned int cols = 80;
+static unsigned int rows = 24;
 
 #if 0 /* TODO */
 /*
@@ -235,23 +230,27 @@ static const MouseShortcut mshortcuts[] = {
 #define MODKEY  Mod1Mask
 #define TERMMOD (ControlMask | ShiftMask)
 
-#if 0 /* TODO */
+/* clang-format off */
 static const Shortcut shortcuts[] = {
     /* mask                 keysym          function        argument */
-    {XK_ANY_MOD,  XK_Break,    sendbreak,     {.i = 0} },
-    {ControlMask, XK_Print,    toggleprinter, {.i = 0} },
-    {ShiftMask,   XK_Print,    printscreen,   {.i = 0} },
-    {XK_ANY_MOD,  XK_Print,    printsel,      {.i = 0} },
-    {TERMMOD,     XK_Prior,    zoom,          {.f = +1}},
-    {TERMMOD,     XK_Next,     zoom,          {.f = -1}},
-    {TERMMOD,     XK_Home,     zoomreset,     {.f = 0} },
-    {TERMMOD,     XK_C,        clipcopy,      {.i = 0} },
-    {TERMMOD,     XK_V,        clippaste,     {.i = 0} },
-    {TERMMOD,     XK_Y,        selpaste,      {.i = 0} },
-    {ShiftMask,   XK_Insert,   selpaste,      {.i = 0} },
-    {TERMMOD,     XK_Num_Lock, numlock,       {.i = 0} },
-};
+#if 0 /* TODO */
+    {XK_ANY_MOD,  XKB_KEY_Break,    sendbreak,     {.i =  0} },
+    {ControlMask, XKB_KEY_Print,    toggleprinter, {.i =  0} },
+    {ShiftMask,   XKB_KEY_Print,    printscreen,   {.i =  0} },
+    {XK_ANY_MOD,  XKB_KEY_Print,    printsel,      {.i =  0} },
 #endif
+    {TERMMOD,     XKB_KEY_Prior,    zoom,          {.f = +1} },
+    {TERMMOD,     XKB_KEY_Next,     zoom,          {.f = -1} },
+    {TERMMOD,     XKB_KEY_Home,     zoomreset,     {.f =  0} },
+#if 0 /* TODO */
+    {TERMMOD,     XKB_KEY_C,        clipcopy,      {.i =  0} },
+    {TERMMOD,     XKB_KEY_V,        clippaste,     {.i =  0} },
+    {TERMMOD,     XKB_KEY_Y,        selpaste,      {.i =  0} },
+    {ShiftMask,   XKB_KEY_Insert,   selpaste,      {.i =  0} },
+#endif
+    {TERMMOD,     XKB_KEY_Num_Lock, numlock,       {.i =  0} },
+};
+/* clang-format on */
 
 /*
  * Special keys (change & recompile st.info accordingly)
@@ -350,7 +349,7 @@ static const Key key[] = {
     {XKB_KEY_KP_8,         XKB_ANY_MOD,                        "\033Ox",     +2, 0 },
     {XKB_KEY_KP_9,         XKB_ANY_MOD,                        "\033Oy",     +2, 0 },
     {XKB_KEY_Up,           ShiftMask,                          "\033[1;2A",  0,  0 },
-    {XKB_KEY_Up,           Mod1Mask,			       "\033[1;3A",  0,  0 },
+    {XKB_KEY_Up,           Mod1Mask,			   "\033[1;3A",  0,  0 },
     {XKB_KEY_Up,           ShiftMask | Mod1Mask,               "\033[1;4A",  0,  0 },
     {XKB_KEY_Up,           ControlMask,                        "\033[1;5A",  0,  0 },
     {XKB_KEY_Up,           ShiftMask | ControlMask,            "\033[1;6A",  0,  0 },

@@ -89,6 +89,7 @@ void sendbreak(const Arg *);
 void toggleprinter(const Arg *);
 
 int tattrset(int);
+void tfree(void);
 void tnew(int, int);
 void tresize(int, int);
 void tsetdirtattr(int);
@@ -119,7 +120,7 @@ extern const char *scroll;
 extern const char *stty_args;
 extern const char *vtiden;
 extern const wchar_t *worddelimiters;
-extern const int allowaltscreen;
+extern int allowaltscreen;
 extern const int allowwindowops;
 extern const char *termname;
 extern const unsigned int tabspaces;

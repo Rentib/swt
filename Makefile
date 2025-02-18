@@ -1,3 +1,4 @@
+# See LICENSE file for copyright and license details.
 .POSIX:
 
 # swt version
@@ -14,8 +15,6 @@ INCS = `$(PKG_CONFIG) --cflags $(PKGS)`
 LIBS = `$(PKG_CONFIG) --libs $(PKGS)`
 
 # flags
-# CFLAGS = -std=c99 -Wall -Wextra -Werror -pedantic -Ofast -ffast-math
-CFLAGS = -std=c99 -Wall -Wextra -Werror -pedantic -O0 -ggdb
 SWTCPPFLAGS = -DVERSION=\"$(VERSION)\" -D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE=600
 SWTCFLAGS   = $(INCS) $(SWTCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 SWTLDFLAGS  = $(LIBS) $(LDFLAGS)
@@ -35,8 +34,8 @@ all: swt
 $(OBJ): $(PROTO)
 
 util.o: util.h
-st.o: st.h win.h util.h
-swt.o: win.h st.h util.h
+st.o: st.h win.h util.h config.h arg.h
+swt.o: win.h st.h util.h config.h
 
 swt: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(SWTLDFLAGS)
