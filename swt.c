@@ -1139,37 +1139,107 @@ void xbell(void) { warn("TODO: xbell"); }
 
 void xclipcopy(void) { warn("TODO: xclipcopy"); }
 
+#define GETPIXMANCOLOR(c)                                                      \
+	(pixman_color_t *)(IS_TRUECOL(c)                                       \
+			       ? &(pixman_color_t){TRUERED(c), TRUEGREEN(c),   \
+						   TRUEBLUE(c), 0xFFFF}        \
+			       : &(pixman_color_t){                            \
+				     dc.col[c].red, dc.col[c].green,           \
+				     dc.col[c].blue, dc.col[c].alpha})
+
+static void drawunderline(Glyph g, int x, int y, struct fcft_font *f,
+			  pixman_color_t *fg)
+{
+	pixman_image_t *pix = swt.buf.pix, *fill;
+	pixman_color_t *uc;
+	int th  = f->underline.thickness;
+	int off = win.ch - (f->underline.position + f->descent);
+	int top, bot, lx, rx, mx;
+	int dotn = MAX(1, win.cw / (th * 2)), dx, space, i;
+	pixman_rectangle16_t rects[dotn];
+	int dashw;
+
+	if (~g.mode & ATTR_UNDERLINE) return;
+
+	uc = g.mode & ATTR_COLORED_UNDERLINE ? GETPIXMANCOLOR(g.uc) : fg;
+
+	switch (g.us) {
+	case UNDERLINE_NONE:   break;
+	case UNDERLINE_SINGLE: {
+		pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, uc, 1,
+					     (pixman_rectangle16_t[]){
+						 {x, y + off, win.cw, th},
+                });
+	} break;
+	case UNDERLINE_DOUBLE: {
+		pixman_image_fill_rectangles(
+		    PIXMAN_OP_SRC, pix, uc, 2,
+		    (pixman_rectangle16_t[]){
+			{x, y + off,          win.cw, th},
+			{x, y + off + th * 2, win.cw, th},
+                });
+	} break;
+	case UNDERLINE_CURLY: {
+		top = y + off;
+		bot = top + th * 5;
+		lx  = x;
+		rx  = x + win.cw;
+		mx  = lx + win.cw / 2;
+#define I(n) pixman_int_to_fixed(n)
+		fill = pixman_image_create_solid_fill(uc);
+		pixman_composite_trapezoids(
+		    PIXMAN_OP_OVER, fill, pix, PIXMAN_a8, 0, 0, 0, 0, 2,
+		    (pixman_trapezoid_t[]){
+			{I(top),
+			 I(bot),
+			 {{I(lx), I(bot - th)}, {I(mx), I(top - th)}},
+			 {{I(lx), I(bot + th)}, {I(mx), I(top + th)}}},
+			{I(top),
+			 I(bot),
+			 {{I(mx), I(top + th)}, {I(rx), I(bot + th)}},
+			 {{I(mx), I(top - th)}, {I(rx), I(bot - th)}}},
+                });
+		pixman_image_unref(fill);
+	} break;
+	case UNDERLINE_DOTTED: {
+		dx    = x;
+		space = win.cw - (dotn * 2) * th;
+		for (i = 0; i < dotn; i++) {
+			rects[i] = (pixman_rectangle16_t){dx, y + off, th, th};
+			dx += th * 2 + (i < space);
+		}
+		pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, uc, dotn,
+					     rects);
+	} break;
+	case UNDERLINE_DASHED: {
+		dashw = win.cw / 3 + (win.cw % 3 > 0);
+		pixman_image_fill_rectangles(
+		    PIXMAN_OP_SRC, pix, uc, 2,
+		    (pixman_rectangle16_t[]){
+			{x,             y + off, dashw, th},
+			{x + dashw * 2, y + off, dashw, th},
+                });
+	} break;
+	default: warn("unsupported underline style");
+	}
+}
+
 void xdrawglyph(Glyph g, int x, int y)
 {
 	pixman_image_t *pix = swt.buf.pix, *fg_pix;
-	pixman_color_t fg, bg, tmp;
+	pixman_color_t *fg, *bg, *tmp;
 	const struct fcft_glyph *glyph;
 	struct fcft_font *f =
 	    dc.fonts[(!!(g.mode & ATTR_BOLD)) + (!!(g.mode & ATTR_ITALIC)) * 2];
 	int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch;
 
-	if (IS_TRUECOL(g.fg)) {
-		fg.red   = TRUERED(g.fg);
-		fg.green = TRUEGREEN(g.fg);
-		fg.blue  = TRUEBLUE(g.fg);
-		fg.alpha = 0xFFFF;
-	} else {
-		fg = dc.col[g.fg];
-	}
-
-	if (IS_TRUECOL(g.bg)) {
-		bg.red   = TRUERED(g.bg);
-		bg.green = TRUEGREEN(g.bg);
-		bg.blue  = TRUEBLUE(g.bg);
-		bg.alpha = 0xFFFF;
-	} else {
-		bg = dc.col[g.bg];
-	}
+	fg = GETPIXMANCOLOR(g.fg);
+	bg = GETPIXMANCOLOR(g.bg);
 
 	if ((g.mode & ATTR_BOLD_FAINT) == ATTR_FAINT) {
-		fg.red += (1 - 2 * (fg.red > bg.red)) * fg.red / 2;
-		fg.green += (1 - 2 * (fg.green > bg.green)) * fg.green / 2;
-		fg.blue += (1 - 2 * (fg.blue > bg.blue)) * fg.blue / 2;
+		fg->red += (1 - 2 * (fg->red > bg->red)) * fg->red / 2;
+		fg->green += (1 - 2 * (fg->green > bg->green)) * fg->green / 2;
+		fg->blue += (1 - 2 * (fg->blue > bg->blue)) * fg->blue / 2;
 	}
 
 	if (g.mode & ATTR_REVERSE) {
@@ -1182,50 +1252,33 @@ void xdrawglyph(Glyph g, int x, int y)
 
 	if (g.mode & ATTR_INVISIBLE) fg = bg;
 
-	if (!pixman_image_fill_rectangles(
-		PIXMAN_OP_SRC, pix, &bg, 1,
-		&(pixman_rectangle16_t){
-		    .x = winx, .y = winy, .width = win.cw, .height = win.ch}))
-		die("pixman_image_fill_rectangles:");
+	pixman_image_fill_rectangles(
+	    PIXMAN_OP_SRC, pix, bg, 1,
+	    &(pixman_rectangle16_t){
+		.x = winx, .y = winy, .width = win.cw, .height = win.ch});
 
 	glyph = fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_DEFAULT);
 
 	if (!glyph) return;
 
-	fg_pix = pixman_image_create_solid_fill(&fg);
-	if (!fg_pix) die("pixman_image_create_solid_fill:");
-
+	fg_pix = pixman_image_create_solid_fill(fg);
 	pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, glyph->pix, pix, 0, 0,
 				 0, 0, winx + glyph->x,
 				 winy + win.ch - f->descent - glyph->y,
 				 glyph->width, glyph->height);
+	pixman_image_unref(fg_pix);
 
-	if (!pixman_image_unref(fg_pix)) die("pixman_image_unref:");
-
-	if (g.mode & ATTR_UNDERLINE) {
-		if (!pixman_image_fill_rectangles(
-			PIXMAN_OP_SRC, pix, &fg, 1,
-			&(pixman_rectangle16_t){
-			    .x = winx,
-			    .y = winy + win.ch - f->underline.position -
-				 f->descent,
-			    .width  = win.cw,
-			    .height = f->underline.thickness,
-			}))
-			die("pixman_image_fill_rectangles:");
-	}
+	drawunderline(g, winx, winy, f, fg);
 
 	if (g.mode & ATTR_STRUCK) {
-		if (!pixman_image_fill_rectangles(
-			PIXMAN_OP_SRC, pix, &fg, 1,
-			&(pixman_rectangle16_t){
-			    .x = winx,
-			    .y = winy + win.ch - f->strikeout.position -
-				 f->descent,
-			    .width  = win.cw,
-			    .height = f->underline.thickness,
-			}))
-			die("pixman_image_fill_rectangles:");
+		pixman_image_fill_rectangles(
+		    PIXMAN_OP_SRC, pix, fg, 1,
+		    &(pixman_rectangle16_t){
+			.x = winx,
+			.y = winy + win.ch - f->strikeout.position - f->descent,
+			.width  = win.cw,
+			.height = f->underline.thickness,
+		    });
 	}
 }
 
@@ -1233,7 +1286,7 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 {
 	unsigned int thicc  = cursorthickness;
 	pixman_image_t *pix = swt.buf.pix;
-	pixman_color_t drawcol;
+	pixman_color_t *drawcol;
 	uint32_t tmp;
 	int x = borderpx + cx * win.cw, y = borderpx + cy * win.ch;
 
@@ -1249,14 +1302,7 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		g.bg = tmp;
 	}
 
-	if (IS_TRUECOL(g.bg)) {
-		drawcol.red   = TRUERED(g.bg);
-		drawcol.green = TRUEGREEN(g.bg);
-		drawcol.blue  = TRUEBLUE(g.bg);
-		drawcol.alpha = 0xFFFF;
-	} else {
-		drawcol = dc.col[g.bg];
-	}
+	drawcol = GETPIXMANCOLOR(g.bg);
 
 	if (IS_SET(MODE_FOCUSED)) {
 		switch (win.cursor) {
@@ -1265,30 +1311,26 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		case 2: /* Steady Block */ xdrawglyph(g, cx, cy); break;
 		case 3: /* Blinking Underline */
 		case 4: /* Steady Underline */
-			if (!pixman_image_fill_rectangles(
-				PIXMAN_OP_SRC, pix, &drawcol, 1,
-				&(pixman_rectangle16_t){x, y + win.ch - thicc,
-							win.cw, thicc}))
-				die("pixman_image_fill_rectangles:");
+			pixman_image_fill_rectangles(
+			    PIXMAN_OP_SRC, pix, drawcol, 1,
+			    &(pixman_rectangle16_t){x, y + win.ch - thicc,
+						    win.cw, thicc});
 			break;
 		case 5: /* Blinking bar */
 		case 6: /* Steady bar */
-			if (!pixman_image_fill_rectangles(
-				PIXMAN_OP_SRC, pix, &drawcol, 1,
-				&(pixman_rectangle16_t){x, y, thicc, win.ch}))
-				die("pixman_image_fill_rectangles:");
+			pixman_image_fill_rectangles(
+			    PIXMAN_OP_SRC, pix, drawcol, 1,
+			    &(pixman_rectangle16_t){x, y, thicc, win.ch});
 			break;
 		}
 	} else {
-		if (!pixman_image_fill_rectangles(
-			PIXMAN_OP_SRC, pix, &drawcol, 4,
-			(pixman_rectangle16_t[4]){
-			    {x,              y,              win.cw, 1     },
-			    {x,              y,              1,      win.ch},
-			    {x,              y + win.ch - 1, win.cw, 1     },
-			    {x + win.cw - 1, y,              1,      win.ch},
-                }))
-			die("pixman_image_fill_rectangles:");
+		pixman_image_fill_rectangles(PIXMAN_OP_SRC, pix, drawcol, 4,
+					     (pixman_rectangle16_t[4]){
+						 {x,              y,              win.cw, 1     },
+						 {x,              y,              1,      win.ch},
+						 {x,              y + win.ch - 1, win.cw, 1     },
+						 {x + win.cw - 1, y,              1,      win.ch},
+                });
 	}
 }
 
@@ -1351,7 +1393,8 @@ int xgetcolor(int x, unsigned char *r, unsigned char *g, unsigned char *b)
 
 void xseticontitle(char *p)
 {
-	/* FIXME: this might not be the correct way to set the icon title */
+	/* FIXME: this might not be the correct way to set the icon
+	 * title */
 	if (!p || !*p) return;
 	xdg_toplevel_set_title(xdg.toplevel, p);
 }

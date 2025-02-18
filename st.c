@@ -1053,6 +1053,10 @@ void csiparse(void)
 
 	csiescseq.buf[csiescseq.len] = '\0';
 	while (p < csiescseq.buf + csiescseq.len) {
+		if (p != csiescseq.buf && p[-1] == *p && *p == sep) {
+			p++;
+			continue; /* FIXME: this might not work actually */
+		}
 		np = NULL;
 		v  = strtol(p, &np, 10);
 		if (np == p) v = 0;
@@ -1255,57 +1259,144 @@ void tsetattr(const int *attr, int l)
 	for (i = 0; i < l; i++) {
 		switch (attr[i]) {
 		case 0:
-			term.c.attr.mode &=
-			    ~(ATTR_BOLD | ATTR_FAINT | ATTR_ITALIC |
-			      ATTR_UNDERLINE | ATTR_BLINK | ATTR_REVERSE |
-			      ATTR_INVISIBLE | ATTR_STRUCK);
+			term.c.attr.mode &= ATTR_WRAP | ATTR_WIDE | ATTR_WDUMMY;
 			term.c.attr.fg = defaultfg;
 			term.c.attr.bg = defaultbg;
+			term.c.attr.us = UNDERLINE_NONE;
 			break;
-		case 1:  term.c.attr.mode |= ATTR_BOLD; break;
-		case 2:  term.c.attr.mode |= ATTR_FAINT; break;
-		case 3:  term.c.attr.mode |= ATTR_ITALIC; break;
-		case 4:  term.c.attr.mode |= ATTR_UNDERLINE; break;
-		case 5:  /* slow blink */
-			 /* FALLTHROUGH */
-		case 6:  /* rapid blink */ term.c.attr.mode |= ATTR_BLINK; break;
-		case 7:  term.c.attr.mode |= ATTR_REVERSE; break;
-		case 8:  term.c.attr.mode |= ATTR_INVISIBLE; break;
-		case 9:  term.c.attr.mode |= ATTR_STRUCK; break;
+		case 1: term.c.attr.mode |= ATTR_BOLD; break;
+		case 2: term.c.attr.mode |= ATTR_FAINT; break;
+		case 3: term.c.attr.mode |= ATTR_ITALIC; break;
+		case 4:
+			if (csiescseq.narg == 2) {
+				if (csiescseq.arg[1] == UNDERLINE_NONE) {
+					term.c.attr.mode &= ~ATTR_UNDERLINE;
+					term.c.attr.us = UNDERLINE_SINGLE;
+				} else {
+					term.c.attr.mode |= ATTR_UNDERLINE;
+					term.c.attr.us = csiescseq.arg[1];
+				}
+				i++;
+			} else {
+				term.c.attr.mode |= ATTR_UNDERLINE;
+				term.c.attr.us = UNDERLINE_SINGLE;
+			}
+			break;
+		case 5: /* slow blink */
+		case 6: /* rapid blink */ term.c.attr.mode |= ATTR_BLINK; break;
+		case 7: term.c.attr.mode |= ATTR_REVERSE; break;
+		case 8: term.c.attr.mode |= ATTR_INVISIBLE; break;
+		case 9: term.c.attr.mode |= ATTR_STRUCK; break;
+		/*   10  primary font */
+		/*11-19  alternative font */
+		/*   20  fraktur (gothic) */
+		case 21:
+			term.c.attr.mode |= ATTR_UNDERLINE;
+			term.c.attr.us = UNDERLINE_DOUBLE;
+			break;
 		case 22: term.c.attr.mode &= ~(ATTR_BOLD | ATTR_FAINT); break;
 		case 23: term.c.attr.mode &= ~ATTR_ITALIC; break;
-		case 24: term.c.attr.mode &= ~ATTR_UNDERLINE; break;
+		case 24:
+			term.c.attr.mode &= ~ATTR_UNDERLINE;
+			term.c.attr.us = UNDERLINE_SINGLE;
+			break;
 		case 25: term.c.attr.mode &= ~ATTR_BLINK; break;
+		/*   26  proportional spacing */
 		case 27: term.c.attr.mode &= ~ATTR_REVERSE; break;
 		case 28: term.c.attr.mode &= ~ATTR_INVISIBLE; break;
 		case 29: term.c.attr.mode &= ~ATTR_STRUCK; break;
+		case 30:
+		case 31:
+		case 32:
+		case 33:
+		case 34:
+		case 35:
+		case 36:
+		case 37: term.c.attr.fg = attr[i] - 30; break;
 		case 38:
 			if ((idx = tdefcolor(attr, &i, l)) >= 0)
 				term.c.attr.fg = idx;
 			break;
 		case 39: term.c.attr.fg = defaultfg; break;
+		case 40:
+		case 41:
+		case 42:
+		case 43:
+		case 44:
+		case 45:
+		case 46:
+		case 47: term.c.attr.bg = attr[i] - 40; break;
 		case 48:
 			if ((idx = tdefcolor(attr, &i, l)) >= 0)
 				term.c.attr.bg = idx;
 			break;
 		case 49: term.c.attr.bg = defaultbg; break;
-		default:
-			if (BETWEEN(attr[i], 30, 37)) {
-				term.c.attr.fg = attr[i] - 30;
-			} else if (BETWEEN(attr[i], 40, 47)) {
-				term.c.attr.bg = attr[i] - 40;
-			} else if (BETWEEN(attr[i], 90, 97)) {
-				term.c.attr.fg = attr[i] - 90 + 8;
-			} else if (BETWEEN(attr[i], 100, 107)) {
-				term.c.attr.bg = attr[i] - 100 + 8;
-			} else {
-				fprintf(
-				    stderr,
-				    "erresc(default): gfx attr %d unknown\n",
-				    attr[i]);
-				csidump();
+		/*   50  disable proportional spacing */
+		/*   51  framed */
+		/*   52  encircled */
+		/*   53  overlined */
+		/*   54  neither framed nor encircled */
+		/*   55  not overlined */
+		/*   56  nothing */
+		/*   57  nothing */
+		case 58:
+			if ((idx = tdefcolor(attr, &i, l)) >= 0) {
+				term.c.attr.uc = idx;
+				term.c.attr.mode |= ATTR_COLORED_UNDERLINE;
 			}
 			break;
+		case 59:  term.c.attr.mode &= ~ATTR_COLORED_UNDERLINE; break;
+		/*   60  ideogram, wont fix */
+		/*   61  ideogram, wont fix */
+		/*   62  ideogram, wont fix */
+		/*   63  ideogram, wont fix */
+		/*   64  ideogram, wont fix */
+		/*   65  ideogram, wont fix */
+		/*   66  nothing */
+		/*   67  nothing */
+		/*   68  nothing */
+		/*   69  nothing */
+		/*   70  nothing */
+		/*   71  nothing */
+		/*   72  nothing */
+		/*   73  superscript */
+		/*   74  subscript */
+		/*   75  neither superscript nor subscript */
+		/*   76  nothing */
+		/*   77  nothing */
+		/*   78  nothing */
+		/*   79  nothing */
+		/*   80  nothing */
+		/*   81  nothing */
+		/*   82  nothing */
+		/*   83  nothing */
+		/*   84  nothing */
+		/*   85  nothing */
+		/*   86  nothing */
+		/*   87  nothing */
+		/*   88  nothing */
+		/*   89  nothing */
+		case 90:
+		case 91:
+		case 92:
+		case 93:
+		case 94:
+		case 95:
+		case 96:
+		case 97:  term.c.attr.fg = attr[i] - 90 + 8; break;
+		/*   98  nothing */
+		/*   99  nothing */
+		case 100:
+		case 101:
+		case 102:
+		case 103:
+		case 104:
+		case 105:
+		case 106:
+		case 107: term.c.attr.bg = attr[i] - 100 + 8; break;
+		default:
+			warn("erresc(default): gfx attr %d unknown", attr[i]);
+			csidump();
 		}
 	}
 }
@@ -2025,12 +2116,12 @@ void tcontrolcode(uchar ascii)
 	case '\000': /* NUL (IGNORED) */
 	case '\021': /* XON (IGNORED) */
 	case '\023': /* XOFF (IGNORED) */
-	case 0177: /* DEL (IGNORED) */ return;
-	case 0x80: /* TODO: PAD */
-	case 0x81: /* TODO: HOP */
-	case 0x82: /* TODO: BPH */
-	case 0x83: /* TODO: NBH */
-	case 0x84: /* TODO: IND */ break;
+	case 0177:   /* DEL (IGNORED) */ return;
+	case 0x80:   /* TODO: PAD */
+	case 0x81:   /* TODO: HOP */
+	case 0x82:   /* TODO: BPH */
+	case 0x83:   /* TODO: NBH */
+	case 0x84:   /* TODO: IND */ break;
 	case 0x85:           /* NEL -- Next line */
 		tnewline(1); /* always go to first col */
 		break;

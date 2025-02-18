@@ -111,7 +111,7 @@ const unsigned int tabspaces = 8;
 /* Terminal colors (16 first used in escape sequence) */
 /* clang-format off */
 static const uint32_t colorpalette[] = {
-#if 1
+#if 0
 	/* 8 normal colors */
 	0x282828,
 	0xea6962,

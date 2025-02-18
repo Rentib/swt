@@ -16,7 +16,6 @@ functionality.
 
 - [ ] clean up code, it looks terrible and is unmaintainable
 - [ ] shortcuts
-- [ ] csi (like undercurl)
 - [ ] osc
 - [ ] clipboard
 - [ ] synchronized-updates
