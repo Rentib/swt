@@ -838,7 +838,7 @@ void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
 		    &(pixman_rectangle16_t){
 			.x = winx,
 			.y = winy + win.ch - f->strikeout.position - f->descent,
-			.width  = glyph->width,
+			.width  = win.cw,
 			.height = f->underline.thickness,
 		    });
 	}
