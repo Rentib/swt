@@ -28,7 +28,6 @@
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-cursor.h>
-#include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
@@ -36,6 +35,7 @@
 
 char *argv0;
 #include "arg.h"
+#include "bufpool.h"
 #include "st.h"
 #include "util.h"
 #include "win.h"
@@ -147,21 +147,14 @@ struct swt_xkb {
 	struct xkb_context *context;
 	struct xkb_state *state;
 	struct xkb_keymap *keymap;
-	struct xkb_compose_table *compose_table;
-	struct xkb_compose_state *compose_state;
 	uint mods_mask;
-};
-
-struct buffer {
-	struct wl_buffer *wl_buffer;
-	void *data;
-	pixman_image_t *pix;
-	ssize_t size;
-	bool busy;
 };
 
 struct swt {
 	pid_t pid;
+
+	BufPool pool;
+	pixman_image_t *pix;
 
 	struct {
 		int display;
@@ -170,12 +163,8 @@ struct swt {
 		int repeat;
 	} fd;
 
-	struct buffer buf;
-
-	struct {
-		bool running   : 1;
-		bool need_draw : 1;
-	} flags;
+	bool running   : 1;
+	bool need_draw : 1;
 
 	struct {
 		uint32_t key;
@@ -226,10 +215,6 @@ static void xseturgency(int);
 static int evcol(XEvent *);
 static int evrow(XEvent *);
 #endif
-
-static void buffer_init(struct buffer *buf);
-static void buffer_release(void *data, struct wl_buffer *wl_buffer);
-static void buffer_unmap(struct buffer *buf);
 
 static long long cursor_now(void);
 static void cursor_draw(int frame);
@@ -335,10 +320,6 @@ static uint buttons; /* bit field of pressed buttons */
 #endif
 
 /* wayland listeners */
-static const struct wl_buffer_listener buffer_listener = {
-    .release = buffer_release,
-};
-
 static const struct wl_keyboard_listener keyboard_listener = {
     .enter       = keyboard_enter,
     .key         = keyboard_key,
@@ -614,7 +595,7 @@ int xsetcolorname(int x, const char *name)
 void xclear(int x1, int y1, int x2, int y2)
 {
 	pixman_image_fill_boxes(
-	    PIXMAN_OP_SRC, swt.buf.pix,
+	    PIXMAN_OP_SRC, swt.pix,
 	    &dc.col[IS_SET(MODE_REVERSE) ? defaultfg : defaultbg], 1,
 	    &(pixman_box32_t){x1, y1, x2, y2});
 }
@@ -683,7 +664,7 @@ void xinit(int cols, int rows)
 void xdrawunderline(Glyph g, int x, int y, struct fcft_font *f,
 		    pixman_color_t *fg)
 {
-	pixman_image_t *pix = swt.buf.pix, *fill;
+	pixman_image_t *pix = swt.pix, *fill;
 	pixman_color_t *uc;
 	int th  = f->underline.thickness;
 	int off = win.ch - (f->underline.position + f->descent);
@@ -763,7 +744,7 @@ void xdrawglyph(Glyph g, int x, int y)
 void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
 #endif
 {
-	pixman_image_t *pix = swt.buf.pix, *fill;
+	pixman_image_t *pix = swt.pix, *fill;
 	pixman_color_t *fg, *bg, *tmp;
 	const struct fcft_glyph *glyph;
 	struct fcft_font *f =
@@ -847,7 +828,7 @@ void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
 #ifdef LIGATURES
 void xdrawglyphbg(Glyph g, int x, int y)
 {
-	pixman_image_t *pix = swt.buf.pix;
+	pixman_image_t *pix = swt.pix;
 	pixman_color_t *bg;
 	int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch;
 
@@ -868,7 +849,7 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
 #endif
 {
 	unsigned int thicc  = cursorthickness;
-	pixman_image_t *pix = swt.buf.pix;
+	pixman_image_t *pix = swt.pix;
 	pixman_color_t *drawcol;
 	uint32_t tmp;
 	int x = borderpx + cx * win.cw, y = borderpx + cy * win.ch;
@@ -947,14 +928,18 @@ void xsettitle(char *p)
 
 int xstartdraw(void)
 {
-	struct buffer *buf = &swt.buf;
+	int resized;
+	DrwBuf *buf = bufpool_getbuf(&swt.pool, wl.shm, win.w, win.h, &resized);
+	if (!buf) {
+		warn(errno ? "bufpool_getbuf:" : "no buffer available");
+		return 0;
+	}
+	swt.pix = buf->pix;
+	if (resized) xclear(0, 0, win.w, win.h);
 
 	/* TODO: ensure window is visible */
-	if (buf->busy) return 0;
 
-	buf->busy = true;
-	buffer_init(&swt.buf);
-	wl_surface_attach(wl.surface, buf->wl_buffer, 0, 0);
+	wl_surface_attach(wl.surface, buf->wl_buf, 0, 0);
 
 	return 1;
 }
@@ -1112,65 +1097,12 @@ void keyboard_keypress(uint32_t key, xkb_keysym_t keysym)
 	}
 
 	ttywrite(buf, len, 1);
-}
-
-void buffer_init(struct buffer *buf)
-{
-	struct wl_shm_pool *pool;
-	char shm_name[14];
-	int fd, stride;
-	int max_tries = 100;
-
-	stride = win.w * sizeof(uint32_t);
-	if (buf->size == stride * win.h) return;
-
-	buffer_unmap(buf);
-	buf->size = stride * win.h;
-
-	srand(time(NULL));
-	do {
-		sprintf(shm_name, "/swt-%d", rand() % 1000000);
-		fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, 0600);
-	} while (fd < 0 && errno == EEXIST && --max_tries);
-
-	if (fd < 0) die("shm_open:");
-	if (shm_unlink(shm_name) < 0) die("shm_unlink:");
-	if (ftruncate(fd, buf->size) < 0) die("ftruncate:");
-	if ((buf->data = mmap(NULL, buf->size, PROT_READ | PROT_WRITE,
-			      MAP_SHARED, fd, 0)) == MAP_FAILED)
-		die("mmap:");
-
-	pool           = wl_shm_create_pool(wl.shm, fd, buf->size);
-	buf->wl_buffer = wl_shm_pool_create_buffer(
-	    pool, 0, win.w, win.h, stride, WL_SHM_FORMAT_ARGB8888);
-	wl_buffer_add_listener(buf->wl_buffer, &buffer_listener, buf);
-	wl_shm_pool_destroy(pool);
-	if (close(fd) < 0) die("close:");
-
-	buf->pix = pixman_image_create_bits(PIXMAN_a8r8g8b8, win.w, win.h,
-					    buf->data, stride);
-	if (!buf->pix) die("pixman_image_create_bits:");
-
-	xclear(0, 0, win.w, win.h);
-}
-
-void buffer_release(void *data, struct wl_buffer *wl_buffer)
-{
-	(void)wl_buffer;
-	((struct buffer *)data)->busy = false;
-}
-
-void buffer_unmap(struct buffer *buf)
-{
-	if (!buf->wl_buffer) return;
-	wl_buffer_destroy(buf->wl_buffer);
-	if (!pixman_image_unref(buf->pix)) die("pixman_image_unref:");
-	if (munmap(buf->data, buf->size) < 0) die("munmap:");
+	swt.need_draw = true;
 }
 
 void cleanup(void)
 {
-	buffer_unmap(&swt.buf);
+	bufpool_cleanup(&swt.pool);
 
 	if (wl.callback) wl_callback_destroy(wl.callback);
 
@@ -1190,8 +1122,6 @@ void cleanup(void)
 	wl_display_disconnect(wl.display);
 
 	xkb_context_unref(xkb.context);
-	xkb_compose_table_unref(xkb.compose_table);
-	xkb_compose_state_unref(xkb.compose_state);
 	xkb_keymap_unref(xkb.keymap);
 	xkb_state_unref(xkb.state);
 
@@ -1361,23 +1291,15 @@ void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
 {
 	struct xkb_keymap *keymap;
 	struct xkb_state *state;
-	struct xkb_compose_table *compose_table;
-	struct xkb_compose_state *compose_state;
-	char *map, *lang;
+	char *map;
 
 	(void)data;
 	(void)wl_keyboard;
 
-	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
-		close(fd);
-		return;
-	}
+	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) die("unknown keymap");
 
 	map = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (map == MAP_FAILED) {
-		close(fd);
-		return;
-	}
+	if (map == MAP_FAILED) die("mmap:");
 
 	keymap = xkb_keymap_new_from_string(xkb.context, map,
 					    XKB_KEYMAP_FORMAT_TEXT_V1,
@@ -1401,22 +1323,6 @@ void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
 
 	xkb.keymap = keymap;
 	xkb.state  = state;
-
-	lang = getenv("LANG");
-	if (lang == NULL) return;
-
-	compose_table = xkb_compose_table_new_from_locale(
-	    xkb.context, lang, XKB_COMPOSE_COMPILE_NO_FLAGS);
-	if (!compose_table) die("xkb_compose_table_new_from_locale:");
-
-	compose_state =
-	    xkb_compose_state_new(compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
-	if (!compose_state) die("xkb_compose_state_new:");
-
-	xkb_compose_table_unref(xkb.compose_table);
-	xkb_compose_state_unref(xkb.compose_state);
-	xkb.compose_table = compose_table;
-	xkb.compose_state = compose_state;
 }
 
 void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
@@ -1440,19 +1346,6 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 
 	keysym = xkb_state_key_get_one_sym(xkb.state, key);
 	keysym = xkb_keysym_to_lower(keysym);
-	if (xkb.compose_state &&
-	    xkb_compose_state_feed(xkb.compose_state, keysym) ==
-		XKB_COMPOSE_FEED_ACCEPTED) {
-		switch (xkb_compose_state_get_status(xkb.compose_state)) {
-		case XKB_COMPOSE_COMPOSED:
-			keysym =
-			    xkb_compose_state_get_one_sym(xkb.compose_state);
-			break;
-		case XKB_COMPOSE_COMPOSING:
-		case XKB_COMPOSE_CANCELLED: keysym = XKB_KEY_NoSymbol; break;
-		case XKB_COMPOSE_NOTHING:   break;
-		}
-	}
 	if (keysym == XKB_KEY_NoSymbol) return;
 
 	if (xkb_keymap_key_repeats(xkb.keymap, key)) {
@@ -1614,21 +1507,21 @@ void noop() {}
 void registry_global(void *data, struct wl_registry *wl_registry, uint32_t name,
 		     const char *interface, uint32_t version)
 {
-	if (!strcmp(interface, "wl_compositor")) {
+	if (!strcmp(interface, wl_compositor_interface.name)) {
 		wl.compositor = wl_registry_bind(
 		    wl_registry, name, &wl_compositor_interface, version);
-	} else if (!strcmp(interface, "wl_shm")) {
+	} else if (!strcmp(interface, wl_shm_interface.name)) {
 		wl.shm = wl_registry_bind(wl_registry, name, &wl_shm_interface,
 					  version);
 		wl_shm_add_listener(wl.shm, &shm_listener, data);
+	} else if (!strcmp(interface, wl_seat_interface.name)) {
+		wl.seat = wl_registry_bind(wl_registry, name,
+					   &wl_seat_interface, version);
+		wl_seat_add_listener(wl.seat, &seat_listener, NULL);
 	} else if (!strcmp(interface, "xdg_wm_base")) {
 		xdg.wm_base = wl_registry_bind(wl_registry, name,
 					       &xdg_wm_base_interface, version);
 		xdg_wm_base_add_listener(xdg.wm_base, &wm_base_listener, NULL);
-	} else if (!strcmp(interface, "wl_seat")) {
-		wl.seat = wl_registry_bind(wl_registry, name,
-					   &wl_seat_interface, version);
-		wl_seat_add_listener(wl.seat, &seat_listener, NULL);
 	} else {
 		/* TODO: maybe register more stuff */
 	}
@@ -1643,6 +1536,10 @@ void seat_capabilities(void *data, struct wl_seat *wl_seat,
 		       uint32_t capabilities)
 {
 	(void)data;
+
+	if (!xkb.context)
+		if (!(xkb.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS)))
+			die("xkb_context_new:");
 
 	if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD && !wl.keyboard) {
 		wl.keyboard = wl_seat_get_keyboard(wl_seat);
@@ -1666,28 +1563,24 @@ void setup(void)
 	sigset_t mask;
 	bool argb;
 
-	swt.fd.pty = ttynew(opt_line, (char *)shell, opt_io, opt_cmd);
-
-	xkb.context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-	if (!xkb.context) die("xkb_context_new:");
-
 	wl.display = wl_display_connect(NULL);
 	if (!wl.display) die("wl_display_connect:");
+
 	wl.registry = wl_display_get_registry(wl.display);
 	if (!wl.registry) die("wl_display_get_registry:");
-
 	wl_registry_add_listener(wl.registry, &registry_listener, &argb);
 	wl_display_roundtrip(wl.display);
 	wl_display_roundtrip(wl.display);
 
 	if (!wl.compositor) die("no wayland compositor registered");
+	if (!wl.shm) die("no wayland shm registered");
 	if (!xdg.wm_base) die("no xdg wm base registered");
 	if (!argb) die("ARGB format is not supported");
 
-	cursor_init();
-
 	wl.surface = wl_compositor_create_surface(wl.compositor);
 	if (!wl.surface) die("wl_compositor_create_surface:");
+
+	cursor_init();
 
 	xdg.surface = xdg_wm_base_get_xdg_surface(xdg.wm_base, wl.surface);
 	if (!xdg.surface) die("xdg_wm_base_get_xdg_surface:");
@@ -1709,6 +1602,7 @@ void setup(void)
 	if (sigprocmask(SIG_BLOCK, &mask, NULL)) die("sigprocmask:");
 
 	swt.fd.display = wl_display_get_fd(wl.display);
+	swt.fd.pty     = ttynew(opt_line, (char *)shell, opt_io, opt_cmd);
 	swt.fd.signal  = signalfd(-1, &mask, 0);
 	swt.fd.repeat  = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
 
@@ -1730,14 +1624,14 @@ void surface_configure(void *data, struct xdg_surface *xdg_surface,
 
 	xdg_surface_ack_configure(xdg_surface, serial);
 
-	swt.flags.need_draw = true;
+	swt.need_draw = true;
 }
 
 void toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 {
 	(void)data;
 	(void)xdg_toplevel;
-	swt.flags.running = false;
+	swt.running = false;
 }
 
 void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
@@ -1747,7 +1641,7 @@ void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
 	(void)xdg_toplevel;
 	(void)states;
 
-	swt.flags.need_draw = false;
+	swt.need_draw = false;
 
 	if (width == win.w && height == win.h) return;
 
@@ -1777,8 +1671,8 @@ void run(void)
 	double timeout = -1;
 	struct timespec now, trigger, lastblink = {0};
 
-	swt.flags.running = true;
-	while (swt.flags.running) {
+	swt.running = true;
+	while (swt.running) {
 		do {
 			n = poll(pfds, LEN(pfds), timeout);
 			if (n < 0 && errno != EAGAIN && errno != EINTR)
@@ -1793,7 +1687,7 @@ void run(void)
 			if (wl_display_dispatch(wl.display) < 0) return;
 		}
 		if (pfds[1].revents & POLLIN) {
-			swt.flags.need_draw = true;
+			swt.need_draw = true;
 			ttyread();
 		}
 		if (pfds[2].revents & POLLIN) {
@@ -1836,7 +1730,7 @@ void run(void)
 		if (blinktimeout && tattrset(ATTR_BLINK)) {
 			timeout = blinktimeout - TIMEDIFF(now, lastblink);
 			if (timeout <= 0) {
-				swt.flags.need_draw = true;
+				swt.need_draw = true;
 				if (-timeout > blinktimeout) /* start visible */
 					win.mode |= MODE_BLINK;
 				win.mode ^= MODE_BLINK;
@@ -1846,8 +1740,8 @@ void run(void)
 			}
 		}
 
-		if (!swt.flags.need_draw) continue;
-		swt.flags.need_draw = false;
+		if (!swt.need_draw) continue;
+		swt.need_draw = false;
 
 		draw();
 		wl_display_flush(wl.display);
@@ -1864,7 +1758,7 @@ void usage(void)
 	    "       %s [-aiv] [-c class] [-f font] [-g geometry]"
 	    " [-n name] [-o file]\n"
 	    "          [-T title] [-t title] [-w windowid] -l line"
-	    " [stty_args ...]\n",
+	    " [stty_args ...]",
 	    argv0, argv0);
 }
 
@@ -1887,7 +1781,7 @@ int main(int argc, char *argv[])
 	case 't':
 	case 'T': opt_title = EARGF(usage()); break;
 	case 'w': opt_embed = EARGF(usage()); break;
-	case 'v': die("%s " VERSION "\n", argv0); break;
+	case 'v': die("%s " VERSION, argv0); break;
 	default:  usage();
 	}
 	ARGEND;
