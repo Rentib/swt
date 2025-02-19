@@ -545,8 +545,6 @@ int xloadcolor(int i, const char *name, pixman_color_t *clr)
 		return 1;
 	}
 
-	warn("setcolor: %s (%d)", name, strlen(name));
-
 	if (*name++ != '#') return 0;
 
 	len = strlen(name);
@@ -569,15 +567,18 @@ void xloadcols(void)
 	static int loaded;
 
 	if (!loaded) {
-		dc.collen = MAX(LEN(colorpalette), 256);
+		dc.collen = MAX(LEN(colorname), 256);
 		dc.col    = xmalloc(dc.collen * sizeof(pixman_color_t));
 	}
 
 	for (i = 0; i < dc.collen; i++) {
-		dc.col[i].red   = TRUERED(colorpalette[i]);
-		dc.col[i].green = TRUEGREEN(colorpalette[i]);
-		dc.col[i].blue  = TRUEBLUE(colorpalette[i]);
-		dc.col[i].alpha = 0xFFFF;
+		if (!xloadcolor(i, colorname[i], &dc.col[i])) {
+			if (colorname[i])
+				die("could not allocate color '%s'",
+				    colorname[i]);
+			else
+				die("could not allocate color %d", i);
+		}
 	}
 
 	loaded = 1;

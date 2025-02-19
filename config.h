@@ -105,53 +105,45 @@ const unsigned int tabspaces = 8;
 
 /* Terminal colors (16 first used in escape sequence) */
 /* clang-format off */
-static const uint32_t colorpalette[] = {
-#if 0
+static const char *colorname[] = {
+#if 1
 	/* 8 normal colors */
-	0x282828,
-	0xea6962,
-	0xa9b665,
-	0xd8a657,
-	0x7daea3,
-	0xd3869b,
-	0x89b482,
-	0xd4be98,
+	"#282828",
+	"#ea6962",
+	"#a9b665",
+	"#d8a657",
+	"#7daea3",
+	"#d3869b",
+	"#89b482",
+	"#d4be98",
 	/* 8 bright colors */
-	0x928374,
-	0xef938e,
-	0xbbc585,
-	0xe1bb7e,
-	0x9dc2ba,
-	0xe1acbb,
-	0xa7c7a2,
-	0xe2d3ba,
-	/* foreground */
-	0xd4be98,
-	/* background */
-	0x282828,
+	"#928374",
+	"#ef938e",
+	"#bbc585",
+	"#e1bb7e",
+	"#9dc2ba",
+	"#e1acbb",
+	"#a7c7a2",
+	"#e2d3ba",
 #else
 	/* 8 normal colors */
-	0xfbf1c7,
-	0xc14a4a,
-	0x6c782e,
-	0xc35e0a,
-	0x45707a,
-	0x945e80,
-	0x4c7a5d,
-	0x654735,
+	"#fbf1c7",
+	"#c14a4a",
+	"#6c782e",
+	"#c35e0a",
+	"#45707a",
+	"#945e80",
+	"#4c7a5d",
+	"#654735",
 	/* 8 bright colors */
-	0x928374,
-	0xc14a4a,
-	0x6c782e,
-	0xb47109,
-	0x45707a,
-	0x945e80,
-	0x4c7a5d,
-	0x654735,
-	/* foreground */
-	0x654735,
-	/* background */
-	0xfbf1c7,
+	"#928374",
+	"#c14a4a",
+	"#6c782e",
+	"#b47109",
+	"#45707a",
+	"#945e80",
+	"#4c7a5d",
+	"#654735",
 #endif
 	[255] = 0,
 	/* NOTE: one may define more colors, but it requires increasing size in the config struct */
