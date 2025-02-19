@@ -517,13 +517,6 @@ void xresize(int col, int row)
 {
 	win.tw = col * win.cw;
 	win.th = row * win.ch;
-
-	if (swt.buf.busy) {
-		warn("buffer is busy, can't resize");
-		return;
-	}
-	// xclear(0, 0, win.w, win.h);
-	/* TODO: resize to new width */
 }
 
 ushort sixd_to_16bit(int x) { return x == 0 ? 0 : 0x3737 + 0x2828 * x; }
@@ -794,6 +787,24 @@ void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
 	if (g.mode & ATTR_BLINK && win.mode & MODE_BLINK) fg = bg;
 
 	if (g.mode & ATTR_INVISIBLE) fg = bg;
+
+	/* Intelligent cleaning up of the borders. */
+	/* NOTE: in st it is bugged, here it is fixed */
+	if (x == 0) {
+		xclear(0, (y == 0) ? 0 : winy, borderpx,
+		       ((winy + win.ch >= borderpx + win.th)
+			    ? win.h
+			    : (winy + win.ch)));
+	}
+	if (winx + win.cw >= borderpx + win.tw) {
+		xclear(winx + win.cw, (y == 0) ? 0 : winy, win.w,
+		       ((winy + win.ch >= borderpx + win.th)
+			    ? win.h
+			    : (winy + win.ch)));
+	}
+	if (y == 0) xclear(winx, 0, winx + win.cw, borderpx);
+	if (winy + win.ch >= borderpx + win.th)
+		xclear(winx, winy + win.ch, winx + win.cw, win.h);
 
 #ifndef LIGATURES
 	pixman_image_fill_rectangles(
@@ -1149,8 +1160,6 @@ void buffer_init(struct buffer *buf)
 					    buf->data, stride);
 	if (!buf->pix) die("pixman_image_create_bits:");
 
-	/* NOTE: st does some weird shit like "intelligent cleaning up of the
-	 * borders", but idk what for */
 	xclear(0, 0, win.w, win.h);
 }
 
