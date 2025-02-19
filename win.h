@@ -25,7 +25,11 @@ enum win_mode {
 
 void xbell(void);
 void xclipcopy(void);
+#ifndef LIGATURES
 void xdrawcursor(int, int, Glyph, int, int, Glyph);
+#else
+void xdrawcursor(int, int, Glyph, int, int, Glyph, Line, int);
+#endif
 void xdrawline(Line, int, int, int);
 void xfinishdraw(void);
 void xloadcols(void);

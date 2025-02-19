@@ -2532,8 +2532,14 @@ void draw(void)
 	if (term.line[term.c.y][cx].mode & ATTR_WDUMMY) cx--;
 
 	drawregion(0, 0, term.col, term.row);
+#ifndef LIGATURES
 	xdrawcursor(cx, term.c.y, term.line[term.c.y][cx], term.ocx, term.ocy,
 		    term.line[term.ocy][term.ocx]);
+#else
+	xdrawcursor(cx, term.c.y, term.line[term.c.y][cx], term.ocx, term.ocy,
+		    term.line[term.ocy][term.ocx], term.line[term.ocy],
+		    term.col);
+#endif
 	term.ocx = cx;
 	term.ocy = term.c.y;
 	xfinishdraw();

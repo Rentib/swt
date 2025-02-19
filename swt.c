@@ -206,7 +206,12 @@ typedef struct {
 } DC;
 
 static inline ushort sixd_to_16bit(int);
+#ifndef LIGATURES
 static void xdrawglyph(Glyph, int, int);
+#else
+static void xdrawglyph(Glyph, int, int, const struct fcft_glyph *);
+static void xdrawglyphbg(Glyph, int, int);
+#endif
 static void xclear(int, int, int, int);
 static void xinit(int, int);
 static void xdrawunderline(Glyph, int, int, struct fcft_font *,
@@ -758,9 +763,13 @@ void xdrawunderline(Glyph g, int x, int y, struct fcft_font *f,
 	}
 }
 
+#ifndef LIGATURES
 void xdrawglyph(Glyph g, int x, int y)
+#else
+void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
+#endif
 {
-	pixman_image_t *pix = swt.buf.pix, *fg_pix;
+	pixman_image_t *pix = swt.buf.pix, *fill;
 	pixman_color_t *fg, *bg, *tmp;
 	const struct fcft_glyph *glyph;
 	struct fcft_font *f =
@@ -786,21 +795,28 @@ void xdrawglyph(Glyph g, int x, int y)
 
 	if (g.mode & ATTR_INVISIBLE) fg = bg;
 
+#ifndef LIGATURES
 	pixman_image_fill_rectangles(
 	    PIXMAN_OP_SRC, pix, bg, 1,
 	    &(pixman_rectangle16_t){
 		.x = winx, .y = winy, .width = win.cw, .height = win.ch});
 
 	glyph = fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_DEFAULT);
+#else
+	if (lig)
+		glyph = lig;
+	else
+		glyph =
+		    fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_DEFAULT);
+#endif
 
 	if (!glyph) return;
 
-	fg_pix = pixman_image_create_solid_fill(fg);
-	pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, glyph->pix, pix, 0, 0,
-				 0, 0, winx + glyph->x,
-				 winy + win.ch - f->descent - glyph->y,
-				 glyph->width, glyph->height);
-	pixman_image_unref(fg_pix);
+	fill = pixman_image_create_solid_fill(fg);
+	pixman_image_composite32(
+	    PIXMAN_OP_OVER, fill, glyph->pix, pix, 0, 0, 0, 0, winx + glyph->x,
+	    winy + win.ch - f->descent - glyph->y, glyph->width, glyph->height);
+	pixman_image_unref(fill);
 
 	xdrawunderline(g, winx, winy, f, fg);
 
@@ -810,13 +826,34 @@ void xdrawglyph(Glyph g, int x, int y)
 		    &(pixman_rectangle16_t){
 			.x = winx,
 			.y = winy + win.ch - f->strikeout.position - f->descent,
-			.width  = win.cw,
+			.width  = glyph->width,
 			.height = f->underline.thickness,
 		    });
 	}
 }
 
+#ifdef LIGATURES
+void xdrawglyphbg(Glyph g, int x, int y)
+{
+	pixman_image_t *pix = swt.buf.pix;
+	pixman_color_t *bg;
+	int winx = borderpx + x * win.cw, winy = borderpx + y * win.ch;
+
+	bg = GETPIXMANCOLOR((g.mode & ATTR_REVERSE) ? g.fg : g.bg);
+
+	pixman_image_fill_rectangles(
+	    PIXMAN_OP_ATOP, pix, bg, 1,
+	    &(pixman_rectangle16_t){
+		.x = winx, .y = winy, .width = win.cw, .height = win.ch});
+}
+#endif
+
+#ifndef LIGATURES
 void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
+#else
+void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
+		 int len)
+#endif
 {
 	unsigned int thicc  = cursorthickness;
 	pixman_image_t *pix = swt.buf.pix;
@@ -825,7 +862,11 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 	int x = borderpx + cx * win.cw, y = borderpx + cy * win.ch;
 
 	if (selected(ox, oy)) og.mode ^= ATTR_REVERSE;
+#ifndef LIGATURES
 	xdrawglyph(og, ox, oy);
+#else
+	xdrawline(line, 0, oy, len);
+#endif
 
 	if (IS_SET(MODE_HIDE)) return;
 
@@ -844,7 +885,14 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og)
 		switch (win.cursor) {
 		case 0: /* Blinking Block */
 		case 1: /* Blinking Block (Default) */
-		case 2: /* Steady Block */ xdrawglyph(g, cx, cy); break;
+		case 2: /* Steady Block */
+#ifndef LIGATURES
+			xdrawglyph(g, cx, cy);
+#else
+			xdrawglyphbg(g, cx, cy);
+			xdrawglyph(g, cx, cy, NULL);
+#endif
+			break;
 		case 3: /* Blinking Underline */
 		case 4: /* Steady Underline */
 			pixman_image_fill_rectangles(
@@ -901,12 +949,50 @@ int xstartdraw(void)
 
 void xdrawline(Line line, int x1, int y1, int x2)
 {
+#ifndef LIGATURES
 	Glyph g;
 	for (; x1 < x2; x1++) {
 		g = line[x1];
 		if (g.mode == ATTR_WDUMMY) continue;
 		xdrawglyph(g, x1, y1);
 	}
+#else
+	struct fcft_font *f;
+	struct fcft_text_run *run;
+	Rune t[x2 - x1];
+	uint i, len = 0, x = x1;
+	unsigned mode     = 0;
+	unsigned relevant = ATTR_BOLD | ATTR_ITALIC;
+
+	if (x1 == x2) return;
+
+	mode     = line[x1].mode & relevant;
+	t[len++] = line[x1++].u;
+
+	for (; x1 < x2; x1++, len++) {
+		if (mode != (line[x1].mode & (relevant | ATTR_WDUMMY))) {
+			f   = dc.font[(!!(mode & ATTR_BOLD)) +
+                                    (!!(mode & ATTR_ITALIC)) * 2];
+			run = fcft_rasterize_text_run_utf32(
+			    f, len, t, FCFT_SUBPIXEL_DEFAULT);
+			for (i = 0; i < len; i++)
+				xdrawglyphbg(line[x + i], x + i, y1);
+			for (i = 0; i < len; i++, x++)
+				xdrawglyph(line[x], x, y1, run->glyphs[i]);
+			fcft_text_run_destroy(run);
+			len  = 0;
+			mode = line[x1].mode & relevant;
+		}
+		t[len] = line[x1].u;
+	}
+	f   = dc.font[(!!(mode & ATTR_BOLD)) + (!!(mode & ATTR_ITALIC)) * 2];
+	run = fcft_rasterize_text_run_utf32(f, len, t, FCFT_SUBPIXEL_DEFAULT);
+	for (i = 0; i < len; i++)
+		xdrawglyphbg(line[x + i], x + i, y1);
+	for (i = 0; i < len; i++, x++)
+		xdrawglyph(line[x], x, y1, run->glyphs[i]);
+	fcft_text_run_destroy(run);
+#endif
 }
 
 void xfinishdraw(void)

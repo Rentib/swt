@@ -4,8 +4,7 @@ swt is basically a port of [st](https://st.suckless.org/) to wayland.
 
 Why? All the terminals for wayland either use 300+ megs of ram or don't have
 features I want. Foot is fine, but it has neither ligatures nor color
-reloading. This is a work in progress and for now in no way is it better than
-foot, though it has a simpler code base.
+reloading. This is still a work in progress.
 
 This project aims to do only the things that a terminal emulator should do
 without things that can be done by a terminal multiplexer.
@@ -14,13 +13,13 @@ without things that can be done by a terminal multiplexer.
 
 - csi 4:n, 21 (styled underline)
 - csi 58,59 (underline color)
+- ligatures (can be enabled in the Makefile)
 
 ## TODO
 
 - [ ] fontconfig
 - [ ] clipboard
 - [ ] application sync
-- [ ] ligatures
 - [ ] kitty graphics or sixel (probably kitty)
 - [ ] selection and mouse
 - [ ] alpha

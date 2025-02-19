@@ -19,6 +19,9 @@ SWTCPPFLAGS = -DVERSION=\"$(VERSION)\" -D_POSIX_C_SOURCE=200112L -D_XOPEN_SOURCE
 SWTCFLAGS   = $(INCS) $(SWTCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
 SWTLDFLAGS  = $(LIBS) $(LDFLAGS)
 
+# uncomment if you want ligatures
+# SWTCPPFLAGS += -DLIGATURES
+
 # compiler and linker
 CC = c99
 
