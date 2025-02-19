@@ -976,13 +976,9 @@ void xdrawline(Line line, int x1, int y1, int x2)
 	unsigned mode     = 0;
 	unsigned relevant = ATTR_BOLD | ATTR_ITALIC;
 
-	if (x1 == x2) return;
-
-	mode     = line[x1].mode & relevant;
-	t[len++] = line[x1++].u;
-
-	for (; x1 < x2; x1++, len++) {
-		if (mode != (line[x1].mode & (relevant | ATTR_WDUMMY))) {
+	for (; x1 < x2; x1++) {
+		if (len != 0 &&
+		    (x1 + 1 == x2 || (line[x1].mode & relevant) != mode)) {
 			f   = dc.font[(!!(mode & ATTR_BOLD)) +
                                     (!!(mode & ATTR_ITALIC)) * 2];
 			run = fcft_rasterize_text_run_utf32(
@@ -995,15 +991,9 @@ void xdrawline(Line line, int x1, int y1, int x2)
 			len  = 0;
 			mode = line[x1].mode & relevant;
 		}
-		t[len] = line[x1].u;
+		if (line[x1].mode & ATTR_WDUMMY) continue;
+		t[len++] = line[x1].u;
 	}
-	f   = dc.font[(!!(mode & ATTR_BOLD)) + (!!(mode & ATTR_ITALIC)) * 2];
-	run = fcft_rasterize_text_run_utf32(f, len, t, FCFT_SUBPIXEL_DEFAULT);
-	for (i = 0; i < len; i++)
-		xdrawglyphbg(line[x + i], x + i, y1);
-	for (i = 0; i < len; i++, x++)
-		xdrawglyph(line[x], x, y1, run->glyphs[i]);
-	fcft_text_run_destroy(run);
 #endif
 }
 
