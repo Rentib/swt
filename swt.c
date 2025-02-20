@@ -1,34 +1,26 @@
 /* See LICENSE file for copyright and license details. */
 
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
 #include <poll.h>
-#include <pty.h>
-#include <pwd.h>
 #include <signal.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
-#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
-#include <sys/wait.h>
 
 #include <fcft/fcft.h>
+#include <linux/input-event-codes.h>
 #include <pixman-1/pixman.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-cursor.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
 #include "xdg-shell-protocol.h"
@@ -65,7 +57,7 @@ typedef struct {
 	signed char appcursor; /* application cursor */
 } Key;
 
-/* X modifiers */
+/* xkb modifiers */
 #define XKB_ANY_MOD    (UINT_MAX)
 #define XKB_NO_MOD     (0)
 #define XKB_SWITCH_MOD (1 << 13 | 1 << 14)
@@ -82,22 +74,18 @@ typedef struct {
 #define Button3Mask    (1 << 10)
 #define Button4Mask    (1 << 11)
 #define Button5Mask    (1 << 12)
+#define Button1        (1)
+#define Button2        (2)
+#define Button3        (3)
+#define Button4        (4)
+#define Button5        (5)
 
 /* function definitions used in config.h */
-#if 0 /* TODO: selection and clipboard */
-static void clipcopy(const Arg *);
-static void clippaste(const Arg *);
-#endif
 static void numlock(const Arg *);
-#if 0 /* TODO: selection and clipboard */
-static void selpaste(const Arg *);
-#endif
 static void zoom(const Arg *);
 static void zoomabs(const Arg *);
 static void zoomreset(const Arg *);
-#if 0 /* TODO: will be used for mouse scroll wheel */
 static void ttysend(const Arg *);
-#endif
 
 /* config.h for applying patches and the configuration. */
 #include "config.h"
@@ -133,7 +121,22 @@ struct swt_wl {
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_keyboard *keyboard;
+
 	struct wl_pointer *pointer;
+	struct {
+		uint32_t serial;
+
+		struct wl_surface *surface;
+		struct wl_cursor_theme *theme;
+		struct wl_cursor *cursor;
+		struct wl_callback *callback;
+
+		double scroll[2];
+
+		int x;
+		int y;
+	} cursor;
+
 	struct wl_callback *callback;
 };
 
@@ -148,6 +151,12 @@ struct swt_xkb {
 	struct xkb_state *state;
 	struct xkb_keymap *keymap;
 	uint mods_mask;
+
+	struct {
+		uint32_t key;
+		xkb_keysym_t keysym;
+		struct itimerspec ts;
+	} repeat;
 };
 
 struct swt {
@@ -165,25 +174,6 @@ struct swt {
 
 	bool running   : 1;
 	bool need_draw : 1;
-
-	struct {
-		uint32_t key;
-		xkb_keysym_t keysym;
-		struct itimerspec ts;
-	} repeat;
-
-	struct {
-		wl_fixed_t x;
-		wl_fixed_t y;
-
-		struct wl_cursor_theme *theme;
-		struct wl_cursor *text;
-		struct wl_cursor *current;
-		struct wl_surface *surface;
-		struct wl_callback *callback;
-		long long anim_start;
-		uint32_t enter_serial;
-	} ptr;
 };
 
 /* Drawing Context */
@@ -194,38 +184,7 @@ typedef struct {
 	int fontsize;
 } DC;
 
-static inline ushort sixd_to_16bit(int);
-#ifndef LIGATURES
-static void xdrawglyph(Glyph, int, int);
-#else
-static void xdrawglyph(Glyph, int, int, const struct fcft_glyph *);
-static void xdrawglyphbg(Glyph, int, int);
-#endif
-static void xclear(int, int, int, int);
-static void xinit(int, int);
-static void xdrawunderline(Glyph, int, int, struct fcft_font *,
-			   pixman_color_t *);
-static void cresize(int, int);
-static void xresize(int, int);
-static int xloadcolor(int, const char *, pixman_color_t *);
-static void xloadfonts(const char *, double);
-static void xunloadfonts(void);
-static void xseturgency(int);
-#if 0 /* TODO: needed for mouse */
-static int evcol(XEvent *);
-static int evrow(XEvent *);
-#endif
-
-static long long cursor_now(void);
-static void cursor_draw(int frame);
-static void cursor_frame_callback(void *data, struct wl_callback *cb,
-				  uint32_t time);
-static void cursor_request_frame_callback(void);
-static void cursor_unset(void);
-static void cursor_set(struct wl_cursor *cursor);
-static void cursor_init(void);
-static void cursor_free(void);
-
+/* function definitions for wayland {{{ */
 static void frame_done(void *data, struct wl_callback *wl_callback,
 		       uint32_t callback_data);
 
@@ -237,7 +196,7 @@ static void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
 static void keyboard_key(void *data, struct wl_keyboard *wl_keyboard,
 			 uint32_t serial, uint32_t time, uint32_t key,
 			 uint32_t state);
-static void keyboard_keypress(uint32_t key, xkb_keysym_t keysym);
+static void kpress(uint32_t key, xkb_keysym_t keysym);
 static void keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
 			   uint32_t serial, struct wl_surface *surface);
 static void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
@@ -247,6 +206,13 @@ static void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
 static void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 				 int32_t rate, int32_t delay);
 
+static void pointer_axis(void *data, struct wl_pointer *wl_pointer,
+			 uint32_t time, uint32_t axis, wl_fixed_t value);
+static void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer,
+			      uint32_t time, uint32_t axis);
+static void pointer_button(void *data, struct wl_pointer *wl_pointer,
+			   uint32_t serial, uint32_t time, uint32_t button,
+			   uint32_t state);
 static void pointer_enter(void *data, struct wl_pointer *wl_pointer,
 			  uint32_t serial, struct wl_surface *surface,
 			  wl_fixed_t surface_x, wl_fixed_t surface_y);
@@ -255,11 +221,6 @@ static void pointer_leave(void *data, struct wl_pointer *wl_pointer,
 static void pointer_motion(void *data, struct wl_pointer *wl_pointer,
 			   uint32_t time, wl_fixed_t surface_x,
 			   wl_fixed_t surface_y);
-static void pointer_button(void *data, struct wl_pointer *wl_pointer,
-			   uint32_t serial, uint32_t time, uint32_t button,
-			   uint32_t state);
-static void pointer_axis(void *data, struct wl_pointer *wl_pointer,
-			 uint32_t time, uint32_t axis, wl_fixed_t value);
 
 static void noop();
 
@@ -271,8 +232,6 @@ static void repeat_cancel(void);
 
 static void seat_capabilities(void *data, struct wl_seat *wl_seat,
 			      uint32_t capabilities);
-
-static void setup(void);
 
 static void shm_format(void *data, struct wl_shm *wl_shm, uint32_t format);
 
@@ -286,12 +245,41 @@ static void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
 
 static void wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base,
 			 uint32_t serial);
+/* }}} */
 
+static inline ushort sixd_to_16bit(int);
+#ifndef LIGATURES
+static void xdrawglyph(Glyph, int, int);
+#else
+static void xdrawglyph(Glyph, int, int, const struct fcft_glyph *);
+static void xdrawglyphbg(Glyph, int, int);
+#endif
+static void xclear(int, int, int, int);
+static void xdrawunderline(Glyph, int, int, struct fcft_font *,
+			   pixman_color_t *);
+static void cresize(int, int);
+static void xresize(int, int);
+static int xloadcolor(int, const char *, pixman_color_t *);
+static void xloadfonts(const char *, double);
+static void xunloadfonts(void);
+static void xseturgency(int);
+static int evcol(void);
+static int evrow(void);
+
+static uint buttonmask(uint);
+static int mouseaction(uint, uint);
+static void brelease(uint);
+static void bpress(uint);
+static void bmotion(void);
+static void mousereport(uint, bool, bool);
 static char *kmap(xkb_keysym_t, uint);
 static int match(uint, uint);
 
+static void xinit(int, int);
+static void setup(void);
 static void run(void);
 static void usage(void);
+static void cleanup(void);
 
 /* globals */
 static DC dc;
@@ -315,11 +303,9 @@ static char *opt_line  = NULL;
 static char *opt_name  = NULL;
 static char *opt_title = NULL;
 
-#if 0 /* TODO: needed for mouse */
 static uint buttons; /* bit field of pressed buttons */
-#endif
 
-/* wayland listeners */
+/* wayland listeners {{{ */
 static const struct wl_keyboard_listener keyboard_listener = {
     .enter       = keyboard_enter,
     .key         = keyboard_key,
@@ -330,17 +316,17 @@ static const struct wl_keyboard_listener keyboard_listener = {
 };
 
 static const struct wl_pointer_listener pointer_listener = {
+    .axis_discrete           = noop,
+    .axis                    = pointer_axis,
+    .axis_relative_direction = noop,
+    .axis_source             = noop,
+    .axis_stop               = pointer_axis_stop,
+    .axis_value120           = noop,
+    .button                  = pointer_button,
     .enter                   = pointer_enter,
+    .frame                   = noop,
     .leave                   = pointer_leave,
     .motion                  = pointer_motion,
-    .button                  = pointer_button,
-    .axis                    = pointer_axis,
-    .frame                   = noop,
-    .axis_source             = noop,
-    .axis_stop               = noop,
-    .axis_discrete           = noop,
-    .axis_value120           = noop,
-    .axis_relative_direction = noop,
 };
 
 static const struct wl_seat_listener seat_listener = {
@@ -367,10 +353,6 @@ static const struct xdg_wm_base_listener wm_base_listener = {
     .ping = wm_base_ping,
 };
 
-static const struct wl_callback_listener cursor_frame_listener = {
-    .done = cursor_frame_callback,
-};
-
 static struct wl_callback_listener frame_listener = {
     .done = frame_done,
 };
@@ -379,40 +361,7 @@ static struct wl_registry_listener registry_listener = {
     .global        = registry_global,
     .global_remove = noop,
 };
-
-#if 0 /* TODO: selection and clipboard */
-void
-clipcopy(const Arg *dummy)
-{
-	Atom clipboard;
-
-	free(xsel.clipboard);
-	xsel.clipboard = NULL;
-
-	if (xsel.primary != NULL) {
-		xsel.clipboard = xstrdup(xsel.primary);
-		clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
-		XSetSelectionOwner(xw.dpy, clipboard, xw.win, CurrentTime);
-	}
-}
-
-void
-clippaste(const Arg *dummy)
-{
-	Atom clipboard;
-
-	clipboard = XInternAtom(xw.dpy, "CLIPBOARD", 0);
-	XConvertSelection(xw.dpy, clipboard, xsel.xtarget, clipboard,
-			xw.win, CurrentTime);
-}
-
-void
-selpaste(const Arg *dummy)
-{
-	XConvertSelection(xw.dpy, XA_PRIMARY, xsel.xtarget, XA_PRIMARY,
-			xw.win, CurrentTime);
-}
-#endif
+/* }}} */
 
 void numlock(const Arg *dummy)
 {
@@ -434,9 +383,6 @@ void zoomabs(const Arg *arg)
 	xloadfonts(usedfont, arg->f);
 	cresize(0, 0);
 	redraw();
-#if 0 /* TODO: */
-	xhints();
-#endif
 }
 
 void zoomreset(const Arg *arg)
@@ -453,23 +399,146 @@ void zoomreset(const Arg *arg)
 
 void ttysend(const Arg *arg) { ttywrite(arg->s, strlen(arg->s), 1); }
 
-#if 0 /* TODO: needed for mouse */
-int
-evcol(XEvent *e)
+int evcol(void)
 {
-	int x = e->xbutton.x - borderpx;
+	int x = wl.cursor.x - borderpx;
 	LIMIT(x, 0, win.tw - 1);
 	return x / win.cw;
 }
 
-int
-evrow(XEvent *e)
+int evrow(void)
 {
-	int y = e->xbutton.y - borderpx;
+	int y = wl.cursor.y - borderpx;
 	LIMIT(y, 0, win.th - 1);
 	return y / win.ch;
 }
-#endif
+
+void mousereport(uint button, bool is_release, bool is_motion)
+{
+	int len, btn, code;
+	int x = evcol(), y = evrow();
+	int state = xkb.mods_mask;
+	char buf[40];
+	static int ox, oy;
+
+	if (is_motion) {
+		if (x == ox && y == oy) return;
+		if (!IS_SET(MODE_MOUSEMOTION) && !IS_SET(MODE_MOUSEMANY))
+			return;
+		/* MODE_MOUSEMOTION: no reporting if no button is pressed */
+		if (IS_SET(MODE_MOUSEMOTION) && buttons == 0) return;
+		/* Set btn to lowest-numbered pressed button, or 12 if no
+		 * buttons are pressed. */
+		for (btn = 1; btn <= 11 && !(buttons & (1 << (btn - 1))); btn++)
+			;
+		code = 32;
+	} else {
+		btn = button;
+		/* Only buttons 1 through 11 can be encoded */
+		if (btn < 1 || btn > 11) return;
+		if (is_release) {
+			/* MODE_MOUSEX10: no button release reporting */
+			if (IS_SET(MODE_MOUSEX10)) return;
+			/* Don't send release events for the scroll wheel */
+			if (btn == 4 || btn == 5) return;
+		}
+		code = 0;
+	}
+
+	ox = x;
+	oy = y;
+
+	/* Encode btn into code. If no button is pressed for a motion event in
+	 * MODE_MOUSEMANY, then encode it as a release. */
+	if ((!IS_SET(MODE_MOUSESGR) && is_release) || btn == 12)
+		code += 3;
+	else if (btn >= 8)
+		code += 128 + btn - 8;
+	else if (btn >= 4)
+		code += 64 + btn - 4;
+	else
+		code += btn - 1;
+
+	if (!IS_SET(MODE_MOUSEX10)) {
+		code += ((state & ShiftMask) ? 4 : 0) +
+			((state & Mod1Mask) ? 8 : 0) /* meta key: alt */
+		      + ((state & ControlMask) ? 16 : 0);
+	}
+
+	if (IS_SET(MODE_MOUSESGR)) {
+		len = snprintf(buf, sizeof(buf), "\033[<%d;%d;%d%c", code,
+			       x + 1, y + 1, is_release ? 'm' : 'M');
+	} else if (x < 223 && y < 223) {
+		len = snprintf(buf, sizeof(buf), "\033[M%c%c%c", 32 + code,
+			       32 + x + 1, 32 + y + 1);
+	} else {
+		return;
+	}
+
+	ttywrite(buf, len, 0);
+}
+
+uint buttonmask(uint button)
+{
+	return button == Button1 ? Button1Mask
+	     : button == Button2 ? Button2Mask
+	     : button == Button3 ? Button3Mask
+	     : button == Button4 ? Button4Mask
+	     : button == Button5 ? Button5Mask
+				 : 0;
+}
+
+int mouseaction(uint button, uint release)
+{
+	const MouseShortcut *ms;
+
+	/* ignore Button<N>mask for Button<N> - it's set on release */
+	uint state = xkb.mods_mask & ~buttonmask(button);
+
+	for (ms = mshortcuts; ms < mshortcuts + LEN(mshortcuts); ms++) {
+		if (ms->release == release && ms->button == button &&
+		    (match(ms->mod, state) || /* exact or forced */
+		     match(ms->mod, state & ~forcemousemod))) {
+			ms->func(&(ms->arg));
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+void bpress(uint button)
+{
+	int btn = button;
+
+	if (1 <= btn && btn <= 11) buttons |= 1 << (btn - 1);
+
+	if (IS_SET(MODE_MOUSE) && !(xkb.mods_mask & forcemousemod)) {
+		mousereport(button, false, false);
+		return;
+	}
+
+	if (mouseaction(btn, 0)) return;
+}
+
+void brelease(uint btn)
+{
+	if (1 <= btn && btn <= 11) buttons &= ~(1 << (btn - 1));
+	if (IS_SET(MODE_MOUSE) && !(xkb.mods_mask & forcemousemod)) {
+		mousereport(btn, true, false);
+		return;
+	}
+
+	if (mouseaction(btn, 1)) return;
+}
+
+void bmotion(void)
+{
+	if (IS_SET(MODE_MOUSE) && !(xkb.mods_mask & forcemousemod)) {
+		mousereport(-1, false, true);
+		return;
+	}
+}
 
 void xclipcopy(void) { warn("TODO: xclipcopy"); }
 
@@ -643,22 +712,6 @@ void xunloadfonts(void)
 	unsigned i;
 	for (i = 0; i < LEN(dc.font); i++)
 		if (dc.font[i]) fcft_destroy(dc.font[i]);
-}
-
-void xinit(int cols, int rows)
-{
-	/* font */
-	usedfont = (opt_font == NULL) ? (char *)font : opt_font;
-	/* TODO: remove fontsize from config */
-	defaultfontsize = fontsize;
-	xloadfonts(font, fontsize);
-
-	/* colors */
-	xloadcols();
-
-	/* adjust fixed window geometry */
-	win.w = 2 * borderpx + cols * win.cw;
-	win.h = 2 * borderpx + rows * win.ch;
 }
 
 void xdrawunderline(Glyph g, int x, int y, struct fcft_font *f,
@@ -1057,7 +1110,7 @@ char *kmap(xkb_keysym_t k, uint state)
 	return NULL;
 }
 
-void keyboard_keypress(uint32_t key, xkb_keysym_t keysym)
+void kpress(uint32_t key, xkb_keysym_t keysym)
 {
 	int len;
 	char buf[64], *customkey;
@@ -1066,7 +1119,7 @@ void keyboard_keypress(uint32_t key, xkb_keysym_t keysym)
 
 	if (IS_SET(MODE_KBDLOCK)) return;
 
-	/* 1. TODO: user defined shortcuts */
+	/* 1. shortcuts */
 	for (bp = shortcuts; bp < shortcuts + LEN(shortcuts); bp++) {
 		if (keysym == bp->keysym && match(bp->mod, xkb.mods_mask)) {
 			bp->func(&(bp->arg));
@@ -1082,7 +1135,7 @@ void keyboard_keypress(uint32_t key, xkb_keysym_t keysym)
 
 	/* 3. composed string from input method */
 	len = xkb_state_key_get_utf8(xkb.state, key, buf, sizeof(buf));
-	if (!len) return;
+	if (len == 0) return;
 	if (len == 1 && xkb.mods_mask & Mod1Mask) {
 		if (IS_SET(MODE_8BIT)) {
 			if (*buf < 0177) {
@@ -1095,173 +1148,11 @@ void keyboard_keypress(uint32_t key, xkb_keysym_t keysym)
 			len    = 2;
 		}
 	}
-
 	ttywrite(buf, len, 1);
 	swt.need_draw = true;
 }
 
-void cleanup(void)
-{
-	bufpool_cleanup(&swt.pool);
-
-	if (wl.callback) wl_callback_destroy(wl.callback);
-
-	xdg_toplevel_destroy(xdg.toplevel);
-	xdg_surface_destroy(xdg.surface);
-	xdg_wm_base_destroy(xdg.wm_base);
-
-	cursor_free();
-
-	wl_keyboard_destroy(wl.keyboard);
-	wl_surface_destroy(wl.surface);
-	wl_compositor_destroy(wl.compositor);
-	wl_shm_destroy(wl.shm);
-	wl_seat_destroy(wl.seat);
-	wl_registry_destroy(wl.registry);
-	wl_display_flush(wl.display);
-	wl_display_disconnect(wl.display);
-
-	xkb_context_unref(xkb.context);
-	xkb_keymap_unref(xkb.keymap);
-	xkb_state_unref(xkb.state);
-
-	/* NOTE: swt.fd.display closes automatically */
-	if (close(swt.fd.signal) < 0) die("close:");
-	if (close(swt.fd.pty) < 0) die("close:");
-	if (close(swt.fd.repeat) < 0) die("close:");
-
-	tfree();
-
-	free(dc.col);
-	xunloadfonts();
-	fcft_fini();
-}
-
-/* {{{ cursor stolen from havoc */
-long long cursor_now(void)
-{
-	struct timespec t;
-
-	clock_gettime(CLOCK_MONOTONIC, &t);
-	return (long long)t.tv_sec * 1000 + t.tv_nsec / 1000000;
-}
-
-void cursor_draw(int frame)
-{
-	struct wl_buffer *buffer;
-	struct wl_cursor_image *image;
-
-	if ((int)swt.ptr.current->image_count <= frame) {
-		fprintf(stderr, "cursor frame index out of range\n");
-		return;
-	}
-
-	image  = swt.ptr.current->images[frame];
-	buffer = wl_cursor_image_get_buffer(image);
-	wl_surface_attach(swt.ptr.surface, buffer, 0, 0);
-	wl_surface_damage(swt.ptr.surface, 0, 0, image->width, image->height);
-	wl_surface_commit(swt.ptr.surface);
-	wl_pointer_set_cursor(wl.pointer, swt.ptr.enter_serial, swt.ptr.surface,
-			      image->hotspot_x, image->hotspot_y);
-}
-
-void cursor_frame_callback(void *data, struct wl_callback *cb, uint32_t time)
-{
-	(void)data;
-	(void)time;
-	int frame =
-	    wl_cursor_frame(swt.ptr.current, cursor_now() - swt.ptr.anim_start);
-
-	if (cb != swt.ptr.callback) die("wrong callback");
-	wl_callback_destroy(swt.ptr.callback);
-	cursor_request_frame_callback();
-	cursor_draw(frame);
-}
-
-void cursor_request_frame_callback(void)
-{
-	swt.ptr.callback = wl_surface_frame(swt.ptr.surface);
-	wl_callback_add_listener(swt.ptr.callback, &cursor_frame_listener,
-				 NULL);
-}
-
-void cursor_unset(void)
-{
-	if (swt.ptr.callback) {
-		wl_callback_destroy(swt.ptr.callback);
-		swt.ptr.callback = NULL;
-	}
-	swt.ptr.current = NULL;
-}
-
-void cursor_set(struct wl_cursor *cursor)
-{
-	uint32_t duration;
-	int frame;
-
-	cursor_unset();
-
-	if (wl.pointer == NULL) return;
-
-	if (cursor == NULL) goto hide;
-
-	swt.ptr.current = cursor;
-
-	frame = wl_cursor_frame_and_duration(swt.ptr.current, 0, &duration);
-	if (duration) {
-		swt.ptr.anim_start = cursor_now();
-		cursor_request_frame_callback();
-	}
-	cursor_draw(frame);
-
-	return;
-hide:
-	wl_pointer_set_cursor(wl.pointer, swt.ptr.enter_serial, NULL, 0, 0);
-}
-
-void cursor_init(void)
-{
-	int size               = 32;
-	char *size_str         = getenv("XCURSOR_SIZE");
-	struct wl_cursor *text = NULL;
-
-	if (size_str && *size_str) {
-		char *end;
-		long s;
-
-		errno = 0;
-		s     = strtol(size_str, &end, 10);
-		if (errno == 0 && *end == '\0' && s > 0) size = s;
-	}
-
-	swt.ptr.theme =
-	    wl_cursor_theme_load(getenv("XCURSOR_THEME"), size, wl.shm);
-	if (swt.ptr.theme == NULL) return;
-
-	text = wl_cursor_theme_get_cursor(swt.ptr.theme, "text");
-	if (text == NULL)
-		text = wl_cursor_theme_get_cursor(swt.ptr.theme, "ibeam");
-	if (text == NULL)
-		text = wl_cursor_theme_get_cursor(swt.ptr.theme, "xterm");
-
-	swt.ptr.surface = wl_compositor_create_surface(wl.compositor);
-	if (swt.ptr.surface == NULL) {
-		wl_cursor_theme_destroy(swt.ptr.theme);
-		swt.ptr.theme = NULL;
-		return;
-	}
-
-	swt.ptr.text = text;
-}
-
-void cursor_free(void)
-{
-	if (swt.ptr.callback) wl_callback_destroy(swt.ptr.callback);
-	if (swt.ptr.surface) wl_surface_destroy(swt.ptr.surface);
-	if (swt.ptr.theme) wl_cursor_theme_destroy(swt.ptr.theme);
-}
-/* }}} */
-
+/* wayland functions {{{ */
 void frame_done(void *data, struct wl_callback *wl_callback,
 		uint32_t callback_data)
 {
@@ -1340,7 +1231,7 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 	key += 8; /* NOTE: I dont even know what this shit is */
 
 	if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-		if (key == swt.repeat.key) repeat_cancel();
+		if (key == xkb.repeat.key) repeat_cancel();
 		return;
 	}
 
@@ -1349,12 +1240,12 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 	if (keysym == XKB_KEY_NoSymbol) return;
 
 	if (xkb_keymap_key_repeats(xkb.keymap, key)) {
-		swt.repeat.key    = key;
-		swt.repeat.keysym = keysym;
-		timerfd_settime(swt.fd.repeat, 0, &swt.repeat.ts, NULL);
+		xkb.repeat.key    = key;
+		xkb.repeat.keysym = keysym;
+		timerfd_settime(swt.fd.repeat, 0, &xkb.repeat.ts, NULL);
 	}
 
-	keyboard_keypress(key, keysym);
+	kpress(key, keysym);
 }
 
 void keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
@@ -1432,22 +1323,114 @@ void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 	(void)data;
 	(void)wl_keyboard;
 
-	swt.repeat.ts = (struct itimerspec){interval, value};
+	xkb.repeat.ts = (struct itimerspec){interval, value};
+}
+
+void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time,
+		       uint32_t axis)
+{
+	(void)data;
+	(void)time;
+	if (!wl_pointer) return;
+	wl.cursor.scroll[axis] = 0;
+}
+
+void pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
+		  uint32_t axis, wl_fixed_t value)
+{
+	int sign;
+
+	(void)data;
+	(void)time;
+
+	if (!wl_pointer) return;
+
+	/* TODO: axis 0 is vertical and only it is handled for now */
+	if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL) return;
+
+	wl.cursor.scroll[axis] += wl_fixed_to_double(value);
+	sign = 1 - 2 * (wl.cursor.scroll[axis] < 0);
+	if (wl.cursor.scroll[axis] * sign < win.ch) return;
+
+	wl.cursor.scroll[axis] -= sign * win.ch;
+	bpress(sign == -1 ? Button4 : Button5);
+}
+
+void pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
+		    uint32_t time, uint32_t button, uint32_t state)
+{
+	int btn;
+
+	(void)data;
+	(void)serial;
+	(void)time;
+
+	if (!wl_pointer) return;
+
+	switch (button) {
+	case BTN_LEFT:   btn = Button1; break;
+	case BTN_MIDDLE: btn = Button2; break;
+	case BTN_RIGHT:  btn = Button3; break;
+	default:         warn("unknown button: %x", button); return;
+	}
+
+	switch (state) {
+	case WL_POINTER_BUTTON_STATE_PRESSED:  bpress(btn); break;
+	case WL_POINTER_BUTTON_STATE_RELEASED: brelease(btn); break;
+	default:                               warn("unknown button state: %d", state); break;
+	}
 }
 
 void pointer_enter(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
 		   struct wl_surface *surface, wl_fixed_t surface_x,
 		   wl_fixed_t surface_y)
 {
+	char *env, *end;
+	int size, frame;
+
 	(void)data;
 	(void)wl_pointer;
-	(void)surface;
+	if (!surface) return;
+	wl.cursor.serial = serial;
+	wl.cursor.x      = wl_fixed_to_int(surface_x);
+	wl.cursor.y      = wl_fixed_to_int(surface_y);
 
-	swt.ptr.x = surface_x;
-	swt.ptr.y = surface_y;
+	/* FIXME: probably if scale changes, the theme needs to be destroyed */
+	if (wl.cursor.theme) goto set;
 
-	swt.ptr.enter_serial = serial;
-	cursor_set(swt.ptr.text);
+	env  = getenv("XCURSOR_SIZE");
+	size = env ? (int)strtol(env, &end, 10) : 24;
+	env  = getenv("XCURSOR_THEME");
+
+	wl.cursor.theme = wl_cursor_theme_load(env, size, wl.shm);
+	if (!wl.cursor.theme) {
+		warn("failed to load xcursor theme");
+		return;
+	}
+
+	wl.cursor.surface = wl_compositor_create_surface(wl.compositor);
+	if (!wl.cursor.surface) {
+		wl_cursor_theme_destroy(wl.cursor.theme);
+		warn("failed to create cursor surface");
+		return;
+	}
+
+	wl.cursor.cursor = wl_cursor_theme_get_cursor(wl.cursor.theme, "xterm");
+
+set:
+	if (!wl.cursor.cursor) return;
+	frame = wl_cursor_frame(wl.cursor.cursor, 0);
+
+	struct wl_buffer *buffer;
+	struct wl_cursor_image *image;
+
+	image  = wl.cursor.cursor->images[frame];
+	buffer = wl_cursor_image_get_buffer(image);
+	wl_surface_attach(wl.cursor.surface, buffer, 0, 0);
+	wl_surface_damage(wl.cursor.surface, 0, 0, image->width, image->height);
+	wl_surface_commit(wl.cursor.surface);
+	wl_pointer_set_cursor(wl.pointer, wl.cursor.serial, wl.cursor.surface,
+			      image->hotspot_x, image->hotspot_y);
 }
 
 void pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
@@ -1457,49 +1440,26 @@ void pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
 	(void)wl_pointer;
 	(void)serial;
 	(void)surface;
-	cursor_unset();
+	if (wl.cursor.callback) {
+		wl_callback_destroy(wl.cursor.callback);
+		wl.cursor.callback = NULL;
+	}
+	wl.cursor.x = 0;
+	wl.cursor.y = 0;
+	xkb.mods_mask &= ~(Button1Mask | Button2Mask | Button3Mask |
+			   Button4Mask | Button5Mask);
 }
 
 void pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 		    wl_fixed_t surface_x, wl_fixed_t surface_y)
 {
 	(void)data;
-	(void)wl_pointer;
 	(void)time;
+	if (!wl_pointer) return;
+	wl.cursor.x = wl_fixed_to_int(surface_x);
+	wl.cursor.y = wl_fixed_to_int(surface_y);
 
-	swt.ptr.x = surface_x;
-	swt.ptr.y = surface_y;
-
-	/* TODO: selection */
-
-	if (swt.ptr.current == NULL && swt.ptr.text) cursor_set(swt.ptr.text);
-}
-
-void pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
-		    uint32_t time, uint32_t button, uint32_t state)
-{
-	(void)data;
-	(void)wl_pointer;
-	(void)serial;
-	(void)time;
-	(void)button;
-	(void)state;
-
-	/* TODO: selection */
-
-	if (swt.ptr.current == NULL && swt.ptr.text) cursor_set(swt.ptr.text);
-}
-
-void pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
-		  uint32_t axis, wl_fixed_t value)
-{
-	(void)data;
-	(void)wl_pointer;
-	(void)time;
-	(void)axis;
-	(void)value;
-
-	/* TODO: send csi */
+	bmotion();
 }
 
 void noop() {}
@@ -1558,59 +1518,6 @@ void seat_capabilities(void *data, struct wl_seat *wl_seat,
 	}
 }
 
-void setup(void)
-{
-	sigset_t mask;
-	bool argb;
-
-	wl.display = wl_display_connect(NULL);
-	if (!wl.display) die("wl_display_connect:");
-
-	wl.registry = wl_display_get_registry(wl.display);
-	if (!wl.registry) die("wl_display_get_registry:");
-	wl_registry_add_listener(wl.registry, &registry_listener, &argb);
-	wl_display_roundtrip(wl.display);
-	wl_display_roundtrip(wl.display);
-
-	if (!wl.compositor) die("no wayland compositor registered");
-	if (!wl.shm) die("no wayland shm registered");
-	if (!xdg.wm_base) die("no xdg wm base registered");
-	if (!argb) die("ARGB format is not supported");
-
-	wl.surface = wl_compositor_create_surface(wl.compositor);
-	if (!wl.surface) die("wl_compositor_create_surface:");
-
-	cursor_init();
-
-	xdg.surface = xdg_wm_base_get_xdg_surface(xdg.wm_base, wl.surface);
-	if (!xdg.surface) die("xdg_wm_base_get_xdg_surface:");
-	xdg_surface_add_listener(xdg.surface, &surface_listener, NULL);
-
-	xdg.toplevel = xdg_surface_get_toplevel(xdg.surface);
-	if (!xdg.toplevel) die("xdg_surface_get_toplevel:");
-
-	xdg_toplevel_add_listener(xdg.toplevel, &toplevel_listener, NULL);
-	xdg_toplevel_set_title(xdg.toplevel, title);
-	xdg_toplevel_set_app_id(xdg.toplevel, app_id);
-
-	wl_surface_commit(wl.surface);
-	wl_display_roundtrip(wl.display);
-
-	if (sigemptyset(&mask) < 0) die("sigemptyset:");
-	if (sigaddset(&mask, SIGINT)) die("sigaddset:");
-	if (sigaddset(&mask, SIGTERM)) die("sigaddset:");
-	if (sigprocmask(SIG_BLOCK, &mask, NULL)) die("sigprocmask:");
-
-	swt.fd.display = wl_display_get_fd(wl.display);
-	swt.fd.pty     = ttynew(opt_line, (char *)shell, opt_io, opt_cmd);
-	swt.fd.signal  = signalfd(-1, &mask, 0);
-	swt.fd.repeat  = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
-
-	if (swt.fd.display < 0) die("wl_display_get_fd:");
-	if (swt.fd.signal < 0) die("signalfd:");
-	if (swt.fd.repeat < 0) die("timerfd:");
-}
-
 void shm_format(void *data, struct wl_shm *wl_shm, uint32_t format)
 {
 	(void)wl_shm;
@@ -1653,6 +1560,74 @@ void wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
 	(void)data;
 	xdg_wm_base_pong(xdg_wm_base, serial);
 }
+/* }}} */
+
+void xinit(int cols, int rows)
+{
+	/* font */
+	usedfont = (opt_font == NULL) ? (char *)font : opt_font;
+	/* TODO: remove fontsize from config */
+	defaultfontsize = fontsize;
+	xloadfonts(font, fontsize);
+
+	/* colors */
+	xloadcols();
+
+	/* adjust fixed window geometry */
+	win.w = 2 * borderpx + cols * win.cw;
+	win.h = 2 * borderpx + rows * win.ch;
+}
+
+void setup(void)
+{
+	sigset_t mask;
+	bool argb;
+
+	wl.display = wl_display_connect(NULL);
+	if (!wl.display) die("wl_display_connect:");
+
+	wl.registry = wl_display_get_registry(wl.display);
+	if (!wl.registry) die("wl_display_get_registry:");
+	wl_registry_add_listener(wl.registry, &registry_listener, &argb);
+	wl_display_roundtrip(wl.display);
+	wl_display_roundtrip(wl.display);
+
+	if (!wl.compositor) die("no wayland compositor registered");
+	if (!wl.shm) die("no wayland shm registered");
+	if (!xdg.wm_base) die("no xdg wm base registered");
+	if (!argb) die("ARGB format is not supported");
+
+	wl.surface = wl_compositor_create_surface(wl.compositor);
+	if (!wl.surface) die("wl_compositor_create_surface:");
+
+	xdg.surface = xdg_wm_base_get_xdg_surface(xdg.wm_base, wl.surface);
+	if (!xdg.surface) die("xdg_wm_base_get_xdg_surface:");
+	xdg_surface_add_listener(xdg.surface, &surface_listener, NULL);
+
+	xdg.toplevel = xdg_surface_get_toplevel(xdg.surface);
+	if (!xdg.toplevel) die("xdg_surface_get_toplevel:");
+
+	xdg_toplevel_add_listener(xdg.toplevel, &toplevel_listener, NULL);
+	xdg_toplevel_set_title(xdg.toplevel, title);
+	xdg_toplevel_set_app_id(xdg.toplevel, app_id);
+
+	wl_surface_commit(wl.surface);
+	wl_display_roundtrip(wl.display);
+
+	if (sigemptyset(&mask) < 0) die("sigemptyset:");
+	if (sigaddset(&mask, SIGINT)) die("sigaddset:");
+	if (sigaddset(&mask, SIGTERM)) die("sigaddset:");
+	if (sigprocmask(SIG_BLOCK, &mask, NULL)) die("sigprocmask:");
+
+	swt.fd.display = wl_display_get_fd(wl.display);
+	swt.fd.pty     = ttynew(opt_line, (char *)shell, opt_io, opt_cmd);
+	swt.fd.signal  = signalfd(-1, &mask, 0);
+	swt.fd.repeat  = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+
+	if (swt.fd.display < 0) die("wl_display_get_fd:");
+	if (swt.fd.signal < 0) die("signalfd:");
+	if (swt.fd.repeat < 0) die("timerfd:");
+}
 
 void run(void)
 {
@@ -1692,8 +1667,7 @@ void run(void)
 		}
 		if (pfds[2].revents & POLLIN) {
 			if (read(swt.fd.repeat, &r, sizeof(r)) >= 0)
-				keyboard_keypress(swt.repeat.key,
-						  swt.repeat.keysym);
+				kpress(xkb.repeat.key, xkb.repeat.keysym);
 		}
 		if (pfds[3].revents & POLLIN) {
 			n = read(swt.fd.signal, &si, sizeof(si));
@@ -1720,7 +1694,6 @@ void run(void)
 			}
 			timeout = (maxlatency - TIMEDIFF(now, trigger)) /
 				  maxlatency * minlatency;
-
 			if (timeout > 0)
 				continue; /* we have time, try to find idle */
 		}
@@ -1762,9 +1735,48 @@ void usage(void)
 	    argv0, argv0);
 }
 
+void cleanup(void)
+{
+#define s(f, o)                                                                \
+	do {                                                                   \
+		if (o != NULL) f(o);                                           \
+	} while (0)
+
+	close(swt.fd.signal);
+	close(swt.fd.repeat);
+
+	tfree();
+	s(free, dc.col);
+	xunloadfonts();
+	fcft_fini();
+	bufpool_cleanup(&swt.pool);
+
+	s(xkb_keymap_unref, xkb.keymap);
+	s(xkb_state_unref, xkb.state);
+	s(xkb_context_unref, xkb.context);
+
+	s(xdg_wm_base_destroy, xdg.wm_base);
+	s(xdg_toplevel_destroy, xdg.toplevel);
+	s(xdg_surface_destroy, xdg.surface);
+
+	s(wl_callback_destroy, wl.callback);
+	s(wl_surface_destroy, wl.cursor.surface);
+	s(wl_cursor_theme_destroy, wl.cursor.theme);
+	s(wl_callback_destroy, wl.cursor.callback);
+	s(wl_pointer_release, wl.pointer);
+	s(wl_keyboard_release, wl.keyboard);
+	s(wl_seat_release, wl.seat);
+	s(wl_shm_release, wl.shm);
+	s(wl_compositor_destroy, wl.compositor);
+	s(wl_surface_destroy, wl.surface);
+	s(wl_registry_destroy, wl.registry);
+	s(wl_display_disconnect, wl.display);
+}
+
 int main(int argc, char *argv[])
 {
 	xsetcursor(cursorshape);
+
 	ARGBEGIN
 	{
 	case 'a': allowaltscreen = 0; break;
@@ -1790,7 +1802,7 @@ run:
 	if (argc > 0) /* eat all remaining arguments */
 		opt_cmd = argv;
 
-	if (!opt_title) opt_title = (opt_line || !opt_cmd) ? "st" : opt_cmd[0];
+	if (!opt_title) opt_title = (opt_line || !opt_cmd) ? "swt" : opt_cmd[0];
 
 	setlocale(LC_CTYPE, "");
 	cols = MAX(cols, 1);

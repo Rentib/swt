@@ -2423,6 +2423,11 @@ void tfree(void)
 		free(term.line[i]);
 		free(term.alt[i]);
 	}
+
+	free(term.line);
+	free(term.alt);
+	free(term.dirty);
+	free(term.tabs);
 }
 
 void tresize(int col, int row)

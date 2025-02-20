@@ -18,10 +18,9 @@ without things that can be done by a terminal multiplexer.
 ## TODO
 
 - [ ] fontconfig
-- [ ] clipboard
 - [ ] application sync
+- [ ] selection/clipboard
 - [ ] kitty graphics or sixel (probably kitty)
-- [ ] selection and mouse
 - [ ] alpha
 
 features are listed from most to least urgent (in my opinion)

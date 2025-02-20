@@ -194,29 +194,27 @@ static const unsigned int mousebg    = 0;
 static const unsigned int defaultattr = 11;
 #endif
 
-#if 0 /* TODO */
 /*
  * Force mouse select/shortcuts while mask is active (when MODE_MOUSE is set).
  * Note that if you want to use ShiftMask with selmasks, set this to an other
  * modifier, set to 0 to not use it.
  */
 static const uint forcemousemod = ShiftMask;
-#endif
 
 /*
  * Internal mouse shortcuts.
  * Beware that overloading Button1 will disable the selection.
  */
-#if 0 /* TODO */
 static const MouseShortcut mshortcuts[] = {
-    /* mask                 button   function        argument       release */
-    {XK_ANY_MOD, Button2, selpaste, {.i = 0}, 1},
-    {ShiftMask, Button4, ttysend, {.s = "\033[5;2~"}},
-    {XK_ANY_MOD, Button4, ttysend, {.s = "\031"}},
-    {ShiftMask, Button5, ttysend, {.s = "\033[6;2~"}},
-    {XK_ANY_MOD, Button5, ttysend, {.s = "\005"}},
-};
+/* mask                 button   function        argument       release */
+#if 0  /* TODO */
+    {XKB_ANY_MOD, Button2, selpaste, {.i = 0}, 1},
 #endif
+    {ShiftMask,   Button4, ttysend, {.s = "\033[5;2~"}, 0},
+    {XKB_ANY_MOD, Button4, ttysend, {.s = "\031"},      0},
+    {ShiftMask,   Button5, ttysend, {.s = "\033[6;2~"}, 0},
+    {XKB_ANY_MOD, Button5, ttysend, {.s = "\005"},      0},
+};
 
 /* Internal keyboard shortcuts. */
 #define MODKEY  Mod1Mask
