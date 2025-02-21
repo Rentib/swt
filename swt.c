@@ -74,11 +74,12 @@ typedef struct {
 #define Button3Mask    (1 << 10)
 #define Button4Mask    (1 << 11)
 #define Button5Mask    (1 << 12)
-#define Button1        (1)
-#define Button2        (2)
-#define Button3        (3)
-#define Button4        (4)
-#define Button5        (5)
+
+#define Button1 (1)
+#define Button2 (2)
+#define Button3 (3)
+#define Button4 (4)
+#define Button5 (5)
 
 /* function definitions used in config.h */
 static void numlock(const Arg *);
@@ -888,7 +889,7 @@ void xdrawglyphbg(Glyph g, int x, int y)
 	bg = GETPIXMANCOLOR((g.mode & ATTR_REVERSE) ? g.fg : g.bg);
 
 	pixman_image_fill_rectangles(
-	    PIXMAN_OP_ATOP, pix, bg, 1,
+	    PIXMAN_OP_SRC, pix, bg, 1,
 	    &(pixman_rectangle16_t){
 		.x = winx, .y = winy, .width = win.cw, .height = win.ch});
 }
@@ -1011,14 +1012,15 @@ void xdrawline(Line line, int x1, int y1, int x2)
 	struct fcft_text_run *run;
 	Rune t[x2 - x1];
 	uint i, len = 0, x = x1;
-	unsigned mode     = 0;
-	unsigned relevant = ATTR_BOLD | ATTR_ITALIC;
+	ushort relevant = ATTR_BOLD | ATTR_ITALIC | ATTR_WDUMMY;
 
 	for (; x1 < x2; x1++) {
+		if (~line[x1].mode & ATTR_WDUMMY) t[len++] = line[x1].u;
 		if (len != 0 &&
-		    (x1 + 1 == x2 || (line[x1].mode & relevant) != mode)) {
-			f   = dc.font[(!!(mode & ATTR_BOLD)) +
-                                    (!!(mode & ATTR_ITALIC)) * 2];
+		    (x1 + 1 == x2 || ((line[x1 + 0].mode & relevant) !=
+				      (line[x1 + 1].mode & relevant)))) {
+			f   = dc.font[(!!(line[x1].mode & ATTR_BOLD)) +
+                                    (!!(line[x1].mode & ATTR_ITALIC)) * 2];
 			run = fcft_rasterize_text_run_utf32(
 			    f, len, t, FCFT_SUBPIXEL_DEFAULT);
 			for (i = 0; i < len; i++)
@@ -1026,11 +1028,8 @@ void xdrawline(Line line, int x1, int y1, int x2)
 			for (i = 0; i < len; i++, x++)
 				xdrawglyph(line[x], x, y1, run->glyphs[i]);
 			fcft_text_run_destroy(run);
-			len  = 0;
-			mode = line[x1].mode & relevant;
+			len = 0;
 		}
-		if (line[x1].mode & ATTR_WDUMMY) continue;
-		t[len++] = line[x1].u;
 	}
 #endif
 }
