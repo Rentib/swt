@@ -83,7 +83,6 @@ static const int bellvolume = 0;
 
 /* default TERM value */
 const char *termname = "st-256color"; /* TODO: change to swt-256color */
-const char *title    = "swt";
 const char *app_id   = "swt";
 
 /*
@@ -106,7 +105,7 @@ const unsigned int tabspaces = 8;
 /* Terminal colors (16 first used in escape sequence) */
 /* clang-format off */
 static const char *colorname[] = {
-#if 1
+#if 0
 	/* 8 normal colors */
 	"#282828",
 	"#ea6962",

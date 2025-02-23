@@ -908,6 +908,7 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
 	uint32_t tmp;
 	int x = borderpx + cx * win.cw, y = borderpx + cy * win.ch;
 
+	/* remove the old cursor */
 	if (selected(ox, oy)) og.mode ^= ATTR_REVERSE;
 #ifndef LIGATURES
 	xdrawglyph(og, ox, oy);
@@ -917,6 +918,9 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
 
 	if (IS_SET(MODE_HIDE)) return;
 
+	/*
+	 * Select the right color for the right mode.
+	 */
 	g.mode &=
 	    ATTR_BOLD | ATTR_ITALIC | ATTR_UNDERLINE | ATTR_STRUCK | ATTR_WIDE;
 
@@ -928,6 +932,7 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
 
 	drawcol = GETPIXMANCOLOR(g.bg);
 
+	/* draw the new one */
 	if (IS_SET(MODE_FOCUSED)) {
 		switch (win.cursor) {
 		case 0: /* Blinking Block */
@@ -965,18 +970,14 @@ void xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line,
 	}
 }
 
-void xseticontitle(char *p)
-{
-	/* FIXME: this might not be the correct way to set the icon
-	 * title */
-	if (!p || !*p) return;
-	xdg_toplevel_set_title(xdg.toplevel, p);
-}
+void xseticontitle(char *p) { warn("TODO: xseticontitle '%s'", p); }
 
 void xsettitle(char *p)
 {
-	/* FIXME: this might not be the correct way to set the title */
-	if (!p || !*p) return;
+	DEFAULT(p, opt_title);
+
+	if (p[0] == '\0') p = opt_title;
+
 	xdg_toplevel_set_title(xdg.toplevel, p);
 }
 
@@ -1607,7 +1608,7 @@ void setup(void)
 	if (!xdg.toplevel) die("xdg_surface_get_toplevel:");
 
 	xdg_toplevel_add_listener(xdg.toplevel, &toplevel_listener, NULL);
-	xdg_toplevel_set_title(xdg.toplevel, title);
+	xdg_toplevel_set_title(xdg.toplevel, opt_title);
 	xdg_toplevel_set_app_id(xdg.toplevel, app_id);
 
 	wl_surface_commit(wl.surface);
