@@ -1174,7 +1174,7 @@ void keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
 	(void)keys;
 
 	win.mode |= MODE_FOCUSED;
-	ttywrite("\033[I", 3, 0);
+	if (IS_SET(MODE_FOCUS)) ttywrite("\033[I", 3, 0);
 }
 
 void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
@@ -1258,7 +1258,7 @@ void keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
 
 	repeat_cancel();
 	win.mode &= ~MODE_FOCUSED;
-	ttywrite("\033[O", 3, 0);
+	if (IS_SET(MODE_FOCUS)) ttywrite("\033[O", 3, 0);
 }
 
 void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
