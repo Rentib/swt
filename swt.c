@@ -122,7 +122,8 @@ struct swt_wl {
 	struct wl_shm *shm;
 	struct wl_seat *seat;
 	struct wl_keyboard *keyboard;
-
+	struct wl_output *output;
+	uint32_t scale;
 	struct wl_pointer *pointer;
 	struct {
 		uint32_t serial;
@@ -206,6 +207,10 @@ static void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
 			       uint32_t group);
 static void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 				 int32_t rate, int32_t delay);
+
+static void output_done(void *data, struct wl_output *wl_output);
+static void output_scale(void *data, struct wl_output *wl_output,
+			 int32_t factor);
 
 static void pointer_axis(void *data, struct wl_pointer *wl_pointer,
 			 uint32_t time, uint32_t axis, wl_fixed_t value);
@@ -314,6 +319,15 @@ static const struct wl_keyboard_listener keyboard_listener = {
     .leave       = keyboard_leave,
     .modifiers   = keyboard_modifiers,
     .repeat_info = keyboard_repeat_info,
+};
+
+static const struct wl_output_listener output_listener = {
+    .geometry    = noop,
+    .mode        = noop,
+    .done        = output_done,
+    .scale       = output_scale,
+    .name        = noop,
+    .description = noop,
 };
 
 static const struct wl_pointer_listener pointer_listener = {
@@ -672,8 +686,6 @@ void xclear(int x1, int y1, int x2, int y2)
 
 void xloadfonts(const char *font, double fontsize)
 {
-	/* TODO: do scaling by using wl_output_istener */
-	uint32_t scale = 1;
 	/* NOTE: this expects the length of the font name to be less than 256 */
 	char f[256];
 	char dpi[12];
@@ -691,7 +703,7 @@ void xloadfonts(const char *font, double fontsize)
 	/* TODO: use fontconfig for reading font from config */
 
 	fcft_set_scaling_filter(FCFT_SCALING_FILTER_LANCZOS3);
-	snprintf(dpi, sizeof(dpi), "dpi=%d", scale * 96);
+	snprintf(dpi, sizeof(dpi), "dpi=%d", wl.scale * 96);
 
 	for (i = 0; i < 4; i++) {
 		sprintf(f, "%s:size=%f", font, fontsize);
@@ -994,6 +1006,7 @@ int xstartdraw(void)
 
 	/* TODO: ensure window is visible */
 
+	wl_surface_set_buffer_scale(wl.surface, wl.scale);
 	wl_surface_attach(wl.surface, buf->wl_buf, 0, 0);
 
 	return 1;
@@ -1326,6 +1339,21 @@ void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 	xkb.repeat.ts = (struct itimerspec){interval, value};
 }
 
+void output_done(void *data, struct wl_output *wl_output)
+{
+	(void)data;
+	(void)wl_output;
+	xunloadfonts();
+	xloadfonts(usedfont, defaultfontsize);
+}
+
+void output_scale(void *data, struct wl_output *wl_output, int32_t factor)
+{
+	(void)data;
+	(void)wl_output;
+	wl.scale = factor;
+}
+
 void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 		       uint32_t axis)
 {
@@ -1456,8 +1484,8 @@ void pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 	(void)data;
 	(void)time;
 	if (!wl_pointer) return;
-	wl.cursor.x = wl_fixed_to_int(surface_x);
-	wl.cursor.y = wl_fixed_to_int(surface_y);
+	wl.cursor.x = wl_fixed_to_int(surface_x) * wl.scale;
+	wl.cursor.y = wl_fixed_to_int(surface_y) * wl.scale;
 
 	bmotion();
 }
@@ -1478,12 +1506,15 @@ void registry_global(void *data, struct wl_registry *wl_registry, uint32_t name,
 		wl.seat = wl_registry_bind(wl_registry, name,
 					   &wl_seat_interface, version);
 		wl_seat_add_listener(wl.seat, &seat_listener, NULL);
+	} else if (!strcmp(interface, wl_output_interface.name)) {
+		wl.scale  = 1;
+		wl.output = wl_registry_bind(wl_registry, name,
+					     &wl_output_interface, version);
+		wl_output_add_listener(wl.output, &output_listener, NULL);
 	} else if (!strcmp(interface, "xdg_wm_base")) {
 		xdg.wm_base = wl_registry_bind(wl_registry, name,
 					       &xdg_wm_base_interface, version);
 		xdg_wm_base_add_listener(xdg.wm_base, &wm_base_listener, NULL);
-	} else {
-		/* TODO: maybe register more stuff */
 	}
 }
 
@@ -1530,8 +1561,6 @@ void surface_configure(void *data, struct xdg_surface *xdg_surface,
 	(void)data;
 
 	xdg_surface_ack_configure(xdg_surface, serial);
-
-	swt.need_draw = true;
 }
 
 void toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
@@ -1550,9 +1579,14 @@ void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
 
 	swt.need_draw = false;
 
+	width *= wl.scale;
+	height *= wl.scale;
+
 	if (width == win.w && height == win.h) return;
 
 	cresize(width, height);
+
+	swt.need_draw = true;
 }
 
 void wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
@@ -1764,6 +1798,7 @@ void cleanup(void)
 	s(wl_cursor_theme_destroy, wl.cursor.theme);
 	s(wl_callback_destroy, wl.cursor.callback);
 	s(wl_pointer_release, wl.pointer);
+	s(wl_output_release, wl.output);
 	s(wl_keyboard_release, wl.keyboard);
 	s(wl_seat_release, wl.seat);
 	s(wl_shm_release, wl.shm);
