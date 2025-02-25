@@ -860,13 +860,12 @@ void xdrawglyph(Glyph g, int x, int y, const struct fcft_glyph *lig)
 	    &(pixman_rectangle16_t){
 		.x = winx, .y = winy, .width = win.cw, .height = win.ch});
 
-	glyph = fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_DEFAULT);
+	glyph = fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_NONE);
 #else
 	if (lig)
 		glyph = lig;
 	else
-		glyph =
-		    fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_DEFAULT);
+		glyph = fcft_rasterize_char_utf32(f, g.u, FCFT_SUBPIXEL_NONE);
 #endif
 
 	if (!glyph) return;
@@ -1035,8 +1034,8 @@ void xdrawline(Line line, int x1, int y1, int x2)
 				      (line[x1 + 1].mode & relevant)))) {
 			f   = dc.font[(!!(line[x1].mode & ATTR_BOLD)) +
                                     (!!(line[x1].mode & ATTR_ITALIC)) * 2];
-			run = fcft_rasterize_text_run_utf32(
-			    f, len, t, FCFT_SUBPIXEL_DEFAULT);
+			run = fcft_rasterize_text_run_utf32(f, len, t,
+							    FCFT_SUBPIXEL_NONE);
 			for (i = 0; i < len; i++)
 				xdrawglyphbg(line[x + i], x + i, y1);
 			for (i = 0; i < len; i++, x++)
