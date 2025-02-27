@@ -87,6 +87,7 @@ static void zoom(const Arg *);
 static void zoomabs(const Arg *);
 static void zoomreset(const Arg *);
 static void ttysend(const Arg *);
+static void changealpha(const Arg *);
 
 /* config.h for applying patches and the configuration. */
 #include "config.h"
@@ -414,6 +415,19 @@ void zoomreset(const Arg *arg)
 
 void ttysend(const Arg *arg) { ttywrite(arg->s, strlen(arg->s), 1); }
 
+void changealpha(const Arg *arg)
+{
+	float old = alpha;
+	alpha += arg->f;
+	alpha = MIN(alpha, 1.0);
+	alpha = MAX(alpha, 0.0);
+
+	if (old == alpha) return;
+	xloadcols();
+	swt.need_draw = 1;
+	redraw();
+}
+
 int evcol(void)
 {
 	int x = wl.cursor.x - borderpx;
@@ -646,6 +660,11 @@ void xloadcols(void)
 		}
 	}
 
+	dc.col[defaultbg].alpha *= alpha;
+	dc.col[defaultbg].red *= alpha;
+	dc.col[defaultbg].green *= alpha;
+	dc.col[defaultbg].blue *= alpha;
+
 	loaded = 1;
 }
 
@@ -669,6 +688,14 @@ int xsetcolorname(int x, const char *name)
 	if (!xloadcolor(x, name, &color)) return 1;
 
 	dc.col[x] = color;
+
+	/* set alpha value of bg color */
+	if ((unsigned int)x == defaultbg) {
+		dc.col[defaultbg].alpha *= alpha;
+		dc.col[defaultbg].red *= alpha;
+		dc.col[defaultbg].green *= alpha;
+		dc.col[defaultbg].blue *= alpha;
+	}
 
 	return 0;
 }
@@ -1248,7 +1275,6 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 	}
 
 	keysym = xkb_state_key_get_one_sym(xkb.state, key);
-	keysym = xkb_keysym_to_lower(keysym);
 	if (keysym == XKB_KEY_NoSymbol) return;
 
 	if (xkb_keymap_key_repeats(xkb.keymap, key)) {

@@ -14,6 +14,7 @@ without things that can be done by a terminal multiplexer.
 - csi 4:n, 21 (styled underline)
 - csi 58,59 (underline color)
 - ligatures (can be enabled in the Makefile)
+- alpha (bg opacity)
 
 ## TODO
 
@@ -21,7 +22,6 @@ without things that can be done by a terminal multiplexer.
 - [ ] application sync
 - [ ] selection/clipboard
 - [ ] kitty graphics or sixel (probably kitty)
-- [ ] alpha
 
 features are listed from most to least urgent (in my opinion)
 

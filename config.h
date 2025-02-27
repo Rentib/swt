@@ -102,6 +102,9 @@ const char *app_id   = "swt";
  */
 const unsigned int tabspaces = 8;
 
+/* bg opacity [0,1] */
+static float alpha = 1.0;
+
 /* Terminal colors (16 first used in escape sequence) */
 /* clang-format off */
 static const char *colorname[] = {
@@ -238,6 +241,8 @@ static const Shortcut shortcuts[] = {
     {ShiftMask,   XKB_KEY_Insert,   selpaste,      {.i =  0} },
 #endif
     {TERMMOD,     XKB_KEY_Num_Lock, numlock,       {.i =  0} },
+    {TERMMOD,     XKB_KEY_H,        changealpha,   {.f = -0.05} },
+    {TERMMOD,     XKB_KEY_L,        changealpha,   {.f = +0.05} },
 };
 /* clang-format on */
 
