@@ -18,10 +18,10 @@
 #include <fcft/fcft.h>
 #include <linux/input-event-codes.h>
 #include <pixman-1/pixman.h>
-#include <wayland-client-core.h>
+#include <xkbcommon/xkbcommon.h>
+
 #include <wayland-client-protocol.h>
 #include <wayland-cursor.h>
-#include <xkbcommon/xkbcommon.h>
 
 #include "xdg-shell-protocol.h"
 
@@ -188,70 +188,33 @@ typedef struct {
 } DC;
 
 /* function definitions for wayland {{{ */
-static void frame_done(void *data, struct wl_callback *wl_callback,
-		       uint32_t callback_data);
-
-static void keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
-			   uint32_t serial, struct wl_surface *surface,
-			   struct wl_array *keys);
-static void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
-			    uint32_t format, int32_t fd, uint32_t size);
-static void keyboard_key(void *data, struct wl_keyboard *wl_keyboard,
-			 uint32_t serial, uint32_t time, uint32_t key,
-			 uint32_t state);
-static void kpress(uint32_t key, xkb_keysym_t keysym);
-static void keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
-			   uint32_t serial, struct wl_surface *surface);
-static void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
-			       uint32_t serial, uint32_t mods_depressed,
-			       uint32_t mods_latched, uint32_t mods_locked,
-			       uint32_t group);
-static void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
-				 int32_t rate, int32_t delay);
-
-static void output_done(void *data, struct wl_output *wl_output);
-static void output_scale(void *data, struct wl_output *wl_output,
-			 int32_t factor);
-
-static void pointer_axis(void *data, struct wl_pointer *wl_pointer,
-			 uint32_t time, uint32_t axis, wl_fixed_t value);
-static void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer,
-			      uint32_t time, uint32_t axis);
-static void pointer_button(void *data, struct wl_pointer *wl_pointer,
-			   uint32_t serial, uint32_t time, uint32_t button,
-			   uint32_t state);
-static void pointer_enter(void *data, struct wl_pointer *wl_pointer,
-			  uint32_t serial, struct wl_surface *surface,
-			  wl_fixed_t surface_x, wl_fixed_t surface_y);
-static void pointer_leave(void *data, struct wl_pointer *wl_pointer,
-			  uint32_t serial, struct wl_surface *surface);
-static void pointer_motion(void *data, struct wl_pointer *wl_pointer,
-			   uint32_t time, wl_fixed_t surface_x,
-			   wl_fixed_t surface_y);
-
+/* clang-format off */
 static void noop();
 
-static void registry_global(void *data, struct wl_registry *wl_registry,
-			    uint32_t name, const char *interface,
-			    uint32_t version);
+static void wl_callback_done(void *data, struct wl_callback *wl_callback, uint32_t callback_data);
+static void wl_keyboard_enter(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys);
+static void wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard, uint32_t format, int32_t fd, uint32_t size);
+static void wl_keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state);
+static void wl_keyboard_leave(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, struct wl_surface *surface);
+static void wl_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group);
+static void wl_keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard, int32_t rate, int32_t delay);
+static void wl_output_done(void *data, struct wl_output *wl_output);
+static void wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor);
+static void wl_pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time, uint32_t axis);
+static void wl_pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time, uint32_t axis, wl_fixed_t value);
+static void wl_pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial, uint32_t time, uint32_t button, uint32_t state);
+static void wl_pointer_enter(void *data, struct wl_pointer *wl_pointer, uint32_t serial, struct wl_surface *surface, wl_fixed_t surface_x, wl_fixed_t surface_y);
+static void wl_pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial, struct wl_surface *surface);
+static void wl_pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time, wl_fixed_t surface_x, wl_fixed_t surface_y);
+static void wl_registry_global(void *data, struct wl_registry *wl_registry, uint32_t name, const char *interface, uint32_t version);
+static void wl_seat_capabilities(void *data, struct wl_seat *wl_seat, uint32_t capabilities);
+static void wl_shm_format(void *data, struct wl_shm *wl_shm, uint32_t format);
 
-static void repeat_cancel(void);
-
-static void seat_capabilities(void *data, struct wl_seat *wl_seat,
-			      uint32_t capabilities);
-
-static void shm_format(void *data, struct wl_shm *wl_shm, uint32_t format);
-
-static void surface_configure(void *data, struct xdg_surface *xdg_surface,
-			      uint32_t serial);
-
-static void toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel);
-static void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
-			       int32_t width, int32_t height,
-			       struct wl_array *states);
-
-static void wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base,
-			 uint32_t serial);
+static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface, uint32_t serial);
+static void xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel);
+static void xdg_toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel, int32_t width, int32_t height, struct wl_array *states);
+static void xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial);
+/* clang-format on */
 /* }}} */
 
 static inline ushort sixd_to_16bit(int);
@@ -273,6 +236,7 @@ static void xseturgency(int);
 static int evcol(void);
 static int evrow(void);
 
+static void kpress(uint32_t key, xkb_keysym_t keysym);
 static uint buttonmask(uint);
 static int mouseaction(uint, uint);
 static void brelease(uint);
@@ -313,69 +277,51 @@ static char *opt_title = NULL;
 static uint buttons; /* bit field of pressed buttons */
 
 /* wayland listeners {{{ */
-static const struct wl_keyboard_listener keyboard_listener = {
-    .enter       = keyboard_enter,
-    .key         = keyboard_key,
-    .keymap      = keyboard_keymap,
-    .leave       = keyboard_leave,
-    .modifiers   = keyboard_modifiers,
-    .repeat_info = keyboard_repeat_info,
-};
-
-static const struct wl_output_listener output_listener = {
-    .geometry    = noop,
-    .mode        = noop,
-    .done        = output_done,
-    .scale       = output_scale,
-    .name        = noop,
-    .description = noop,
-};
-
-static const struct wl_pointer_listener pointer_listener = {
-    .axis_discrete           = noop,
-    .axis                    = pointer_axis,
-    .axis_relative_direction = noop,
-    .axis_source             = noop,
-    .axis_stop               = pointer_axis_stop,
-    .axis_value120           = noop,
-    .button                  = pointer_button,
-    .enter                   = pointer_enter,
-    .frame                   = noop,
-    .leave                   = pointer_leave,
-    .motion                  = pointer_motion,
-};
-
-static const struct wl_seat_listener seat_listener = {
-    .capabilities = seat_capabilities,
-    .name         = noop,
-};
-
-static const struct wl_shm_listener shm_listener = {
-    .format = shm_format,
-};
-
-static const struct xdg_surface_listener surface_listener = {
-    .configure = surface_configure,
-};
-
-static const struct xdg_toplevel_listener toplevel_listener = {
-    .close            = toplevel_close,
-    .configure_bounds = noop,
-    .configure        = toplevel_configure,
-    .wm_capabilities  = noop,
-};
-
-static const struct xdg_wm_base_listener wm_base_listener = {
-    .ping = wm_base_ping,
-};
-
-static struct wl_callback_listener frame_listener = {
-    .done = frame_done,
-};
-
-static struct wl_registry_listener registry_listener = {
-    .global        = registry_global,
-    .global_remove = noop,
+static const struct {
+	struct wl_callback_listener wl_callback;
+	struct wl_keyboard_listener wl_keyboard;
+	struct wl_output_listener wl_output;
+	struct wl_pointer_listener wl_pointer;
+	struct wl_registry_listener wl_registry;
+	struct wl_seat_listener wl_seat;
+	struct wl_shm_listener wl_shm;
+	struct xdg_surface_listener xdg_surface;
+	struct xdg_toplevel_listener xdg_toplevel;
+	struct xdg_wm_base_listener xdg_wm_base;
+} listener = {
+    .wl_callback  = {.done = wl_callback_done},
+    .wl_keyboard  = {.keymap      = wl_keyboard_keymap,
+		     .enter       = wl_keyboard_enter,
+		     .leave       = wl_keyboard_leave,
+		     .key         = wl_keyboard_key,
+		     .modifiers   = wl_keyboard_modifiers,
+		     .repeat_info = wl_keyboard_repeat_info},
+    .wl_output    = {.geometry    = noop,
+		     .mode        = noop,
+		     .done        = wl_output_done,
+		     .scale       = wl_output_scale,
+		     .name        = noop,
+		     .description = noop},
+    .wl_pointer   = {.enter                   = wl_pointer_enter,
+		     .leave                   = wl_pointer_leave,
+		     .motion                  = wl_pointer_motion,
+		     .button                  = wl_pointer_button,
+		     .axis                    = wl_pointer_axis,
+		     .frame                   = noop,
+		     .axis_source             = noop,
+		     .axis_stop               = wl_pointer_axis_stop,
+		     .axis_discrete           = noop,
+		     .axis_value120           = noop,
+		     .axis_relative_direction = noop},
+    .wl_registry  = {.global = wl_registry_global, .global_remove = noop},
+    .wl_seat      = {.capabilities = wl_seat_capabilities, .name = noop},
+    .wl_shm       = {.format = wl_shm_format},
+    .xdg_surface  = {.configure = xdg_surface_configure},
+    .xdg_toplevel = {.configure        = xdg_toplevel_configure,
+		     .close            = xdg_toplevel_close,
+		     .configure_bounds = noop,
+		     .wm_capabilities  = noop},
+    .xdg_wm_base  = {.ping = xdg_wm_base_ping},
 };
 /* }}} */
 
@@ -1022,12 +968,22 @@ void xsettitle(char *p)
 int xstartdraw(void)
 {
 	int resized;
-	DrwBuf *buf = bufpool_getbuf(&swt.pool, wl.shm, win.w, win.h, &resized);
+	DrwBuf *buf;
+
+	if (!swt.need_draw || wl.callback) return 0;
+
+	wl.callback = wl_surface_frame(wl.surface);
+	wl_callback_add_listener(wl.callback, &listener.wl_callback, NULL);
+	wl_surface_commit(wl.surface);
+
+	buf = bufpool_getbuf(&swt.pool, wl.shm, win.w, win.h, &resized);
 	if (!buf) {
 		warn(errno ? "bufpool_getbuf:" : "no buffer available");
 		return 0;
 	}
+
 	swt.pix = buf->pix;
+
 	if (resized) xclear(0, 0, win.w, win.h);
 
 	/* TODO: ensure window is visible */
@@ -1035,6 +991,7 @@ int xstartdraw(void)
 	wl_surface_set_buffer_scale(wl.surface, wl.scale);
 	wl_surface_attach(wl.surface, buf->wl_buf, 0, 0);
 
+	swt.need_draw = false;
 	return 1;
 }
 
@@ -1077,8 +1034,6 @@ void xdrawline(Line line, int x1, int y1, int x2)
 void xfinishdraw(void)
 {
 	wl_surface_damage(wl.surface, 0, 0, win.w, win.h);
-	wl.callback = wl_surface_frame(wl.surface);
-	wl_callback_add_listener(wl.callback, &frame_listener, NULL);
 	wl_surface_commit(wl.surface);
 }
 
@@ -1192,19 +1147,20 @@ void kpress(uint32_t key, xkb_keysym_t keysym)
 }
 
 /* wayland functions {{{ */
-void frame_done(void *data, struct wl_callback *wl_callback,
-		uint32_t callback_data)
+void wl_callback_done(void *data, struct wl_callback *wl_callback,
+		      uint32_t callback_data)
 {
 	(void)data;
 	(void)callback_data;
 
 	wl_callback_destroy(wl_callback);
 	wl.callback = NULL;
+	draw();
 }
 
-void keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
-		    uint32_t serial, struct wl_surface *surface,
-		    struct wl_array *keys)
+void wl_keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
+		       uint32_t serial, struct wl_surface *surface,
+		       struct wl_array *keys)
 {
 	(void)data;
 	(void)wl_keyboard;
@@ -1216,8 +1172,8 @@ void keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
 	if (IS_SET(MODE_FOCUS)) ttywrite("\033[I", 3, 0);
 }
 
-void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
-		     uint32_t format, int32_t fd, uint32_t size)
+void wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
+			uint32_t format, int32_t fd, uint32_t size)
 {
 	struct xkb_keymap *keymap;
 	struct xkb_state *state;
@@ -1255,8 +1211,9 @@ void keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
 	xkb.state  = state;
 }
 
-void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
-		  uint32_t time, uint32_t key, uint32_t state)
+void wl_keyboard_key(void *data, struct wl_keyboard *wl_keyboard,
+		     uint32_t serial, uint32_t time, uint32_t key,
+		     uint32_t state)
 {
 	xkb_keysym_t keysym;
 
@@ -1270,7 +1227,9 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 	key += 8; /* NOTE: I dont even know what this shit is */
 
 	if (state == WL_KEYBOARD_KEY_STATE_RELEASED) {
-		if (key == xkb.repeat.key) repeat_cancel();
+		if (key == xkb.repeat.key)
+			timerfd_settime(swt.fd.repeat, 0,
+					&(struct itimerspec){0}, NULL);
 		return;
 	}
 
@@ -1286,23 +1245,23 @@ void keyboard_key(void *data, struct wl_keyboard *wl_keyboard, uint32_t serial,
 	kpress(key, keysym);
 }
 
-void keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
-		    uint32_t serial, struct wl_surface *surface)
+void wl_keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
+		       uint32_t serial, struct wl_surface *surface)
 {
 	(void)data;
 	(void)wl_keyboard;
 	(void)serial;
 	(void)surface;
 
-	repeat_cancel();
+	timerfd_settime(swt.fd.repeat, 0, &(struct itimerspec){0}, NULL);
 	win.mode &= ~MODE_FOCUSED;
 	if (IS_SET(MODE_FOCUS)) ttywrite("\033[O", 3, 0);
 }
 
-void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
-			uint32_t serial, uint32_t mods_depressed,
-			uint32_t mods_latched, uint32_t mods_locked,
-			uint32_t group)
+void wl_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
+			   uint32_t serial, uint32_t mods_depressed,
+			   uint32_t mods_latched, uint32_t mods_locked,
+			   uint32_t group)
 {
 	uint i;
 	xkb_mod_index_t mod;
@@ -1324,8 +1283,6 @@ void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
 	(void)wl_keyboard;
 	(void)serial;
 
-	repeat_cancel();
-
 	if (!xkb.keymap || !xkb.state) return;
 
 	xkb_state_update_mask(xkb.state, mods_depressed, mods_latched,
@@ -1341,8 +1298,8 @@ void keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
 	}
 }
 
-void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
-			  int32_t rate, int32_t delay)
+void wl_keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
+			     int32_t rate, int32_t delay)
 {
 	/* FIXME: rate 0 should disable repeat and here it will divide by zero
 	 */
@@ -1364,7 +1321,7 @@ void keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
 	xkb.repeat.ts = (struct itimerspec){interval, value};
 }
 
-void output_done(void *data, struct wl_output *wl_output)
+void wl_output_done(void *data, struct wl_output *wl_output)
 {
 	(void)data;
 	(void)wl_output;
@@ -1372,15 +1329,15 @@ void output_done(void *data, struct wl_output *wl_output)
 	xloadfonts(usedfont, defaultfontsize);
 }
 
-void output_scale(void *data, struct wl_output *wl_output, int32_t factor)
+void wl_output_scale(void *data, struct wl_output *wl_output, int32_t factor)
 {
 	(void)data;
 	(void)wl_output;
 	wl.scale = factor;
 }
 
-void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time,
-		       uint32_t axis)
+void wl_pointer_axis_stop(void *data, struct wl_pointer *wl_pointer,
+			  uint32_t time, uint32_t axis)
 {
 	(void)data;
 	(void)time;
@@ -1388,8 +1345,8 @@ void pointer_axis_stop(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 	wl.cursor.scroll[axis] = 0;
 }
 
-void pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
-		  uint32_t axis, wl_fixed_t value)
+void wl_pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
+		     uint32_t axis, wl_fixed_t value)
 {
 	int sign;
 
@@ -1409,8 +1366,9 @@ void pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 	bpress(sign == -1 ? Button4 : Button5);
 }
 
-void pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
-		    uint32_t time, uint32_t button, uint32_t state)
+void wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
+		       uint32_t serial, uint32_t time, uint32_t button,
+		       uint32_t state)
 {
 	int btn;
 
@@ -1434,9 +1392,9 @@ void pointer_button(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
 	}
 }
 
-void pointer_enter(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
-		   struct wl_surface *surface, wl_fixed_t surface_x,
-		   wl_fixed_t surface_y)
+void wl_pointer_enter(void *data, struct wl_pointer *wl_pointer,
+		      uint32_t serial, struct wl_surface *surface,
+		      wl_fixed_t surface_x, wl_fixed_t surface_y)
 {
 	char *env, *end;
 	int size, frame;
@@ -1486,8 +1444,8 @@ set:
 			      image->hotspot_x, image->hotspot_y);
 }
 
-void pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
-		   struct wl_surface *surface)
+void wl_pointer_leave(void *data, struct wl_pointer *wl_pointer,
+		      uint32_t serial, struct wl_surface *surface)
 {
 	(void)data;
 	(void)wl_pointer;
@@ -1503,8 +1461,8 @@ void pointer_leave(void *data, struct wl_pointer *wl_pointer, uint32_t serial,
 			   Button4Mask | Button5Mask);
 }
 
-void pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time,
-		    wl_fixed_t surface_x, wl_fixed_t surface_y)
+void wl_pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time,
+		       wl_fixed_t surface_x, wl_fixed_t surface_y)
 {
 	(void)data;
 	(void)time;
@@ -1517,8 +1475,8 @@ void pointer_motion(void *data, struct wl_pointer *wl_pointer, uint32_t time,
 
 void noop() {}
 
-void registry_global(void *data, struct wl_registry *wl_registry, uint32_t name,
-		     const char *interface, uint32_t version)
+void wl_registry_global(void *data, struct wl_registry *wl_registry,
+			uint32_t name, const char *interface, uint32_t version)
 {
 	if (!strcmp(interface, wl_compositor_interface.name)) {
 		wl.compositor = wl_registry_bind(
@@ -1526,30 +1484,26 @@ void registry_global(void *data, struct wl_registry *wl_registry, uint32_t name,
 	} else if (!strcmp(interface, wl_shm_interface.name)) {
 		wl.shm = wl_registry_bind(wl_registry, name, &wl_shm_interface,
 					  version);
-		wl_shm_add_listener(wl.shm, &shm_listener, data);
+		wl_shm_add_listener(wl.shm, &listener.wl_shm, data);
 	} else if (!strcmp(interface, wl_seat_interface.name)) {
 		wl.seat = wl_registry_bind(wl_registry, name,
 					   &wl_seat_interface, version);
-		wl_seat_add_listener(wl.seat, &seat_listener, NULL);
+		wl_seat_add_listener(wl.seat, &listener.wl_seat, NULL);
 	} else if (!strcmp(interface, wl_output_interface.name)) {
 		wl.scale  = 1;
 		wl.output = wl_registry_bind(wl_registry, name,
 					     &wl_output_interface, version);
-		wl_output_add_listener(wl.output, &output_listener, NULL);
+		wl_output_add_listener(wl.output, &listener.wl_output, NULL);
 	} else if (!strcmp(interface, "xdg_wm_base")) {
 		xdg.wm_base = wl_registry_bind(wl_registry, name,
 					       &xdg_wm_base_interface, version);
-		xdg_wm_base_add_listener(xdg.wm_base, &wm_base_listener, NULL);
+		xdg_wm_base_add_listener(xdg.wm_base, &listener.xdg_wm_base,
+					 NULL);
 	}
 }
 
-void repeat_cancel(void)
-{
-	timerfd_settime(swt.fd.repeat, 0, &(struct itimerspec){0}, NULL);
-}
-
-void seat_capabilities(void *data, struct wl_seat *wl_seat,
-		       uint32_t capabilities)
+void wl_seat_capabilities(void *data, struct wl_seat *wl_seat,
+			  uint32_t capabilities)
 {
 	(void)data;
 
@@ -1559,7 +1513,8 @@ void seat_capabilities(void *data, struct wl_seat *wl_seat,
 
 	if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD && !wl.keyboard) {
 		wl.keyboard = wl_seat_get_keyboard(wl_seat);
-		wl_keyboard_add_listener(wl.keyboard, &keyboard_listener, NULL);
+		wl_keyboard_add_listener(wl.keyboard, &listener.wl_keyboard,
+					 NULL);
 	} else if (~capabilities & WL_SEAT_CAPABILITY_KEYBOARD && wl.keyboard) {
 		wl_keyboard_release(wl.keyboard);
 		wl.keyboard = NULL;
@@ -1567,36 +1522,37 @@ void seat_capabilities(void *data, struct wl_seat *wl_seat,
 
 	if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && !wl.pointer) {
 		wl.pointer = wl_seat_get_pointer(wl.seat);
-		wl_pointer_add_listener(wl.pointer, &pointer_listener, NULL);
+		wl_pointer_add_listener(wl.pointer, &listener.wl_pointer, NULL);
 	} else if (~capabilities & WL_SEAT_CAPABILITY_POINTER && wl.pointer) {
 		wl_pointer_release(wl.pointer);
 		wl.pointer = NULL;
 	}
 }
 
-void shm_format(void *data, struct wl_shm *wl_shm, uint32_t format)
+void wl_shm_format(void *data, struct wl_shm *wl_shm, uint32_t format)
 {
 	(void)wl_shm;
 	if (format == WL_SHM_FORMAT_ARGB8888) *(bool *)data = true;
 }
 
-void surface_configure(void *data, struct xdg_surface *xdg_surface,
-		       uint32_t serial)
+void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
+			   uint32_t serial)
 {
 	(void)data;
 
 	xdg_surface_ack_configure(xdg_surface, serial);
 }
 
-void toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
+void xdg_toplevel_close(void *data, struct xdg_toplevel *xdg_toplevel)
 {
 	(void)data;
 	(void)xdg_toplevel;
 	swt.running = false;
 }
 
-void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
-			int32_t width, int32_t height, struct wl_array *states)
+void xdg_toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
+			    int32_t width, int32_t height,
+			    struct wl_array *states)
 {
 	(void)data;
 	(void)xdg_toplevel;
@@ -1614,7 +1570,8 @@ void toplevel_configure(void *data, struct xdg_toplevel *xdg_toplevel,
 	swt.need_draw = true;
 }
 
-void wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base, uint32_t serial)
+void xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base,
+		      uint32_t serial)
 {
 	(void)data;
 	xdg_wm_base_pong(xdg_wm_base, serial);
@@ -1647,7 +1604,7 @@ void setup(void)
 
 	wl.registry = wl_display_get_registry(wl.display);
 	if (!wl.registry) die("wl_display_get_registry:");
-	wl_registry_add_listener(wl.registry, &registry_listener, &argb);
+	wl_registry_add_listener(wl.registry, &listener.wl_registry, &argb);
 	wl_display_roundtrip(wl.display);
 	wl_display_roundtrip(wl.display);
 
@@ -1661,12 +1618,12 @@ void setup(void)
 
 	xdg.surface = xdg_wm_base_get_xdg_surface(xdg.wm_base, wl.surface);
 	if (!xdg.surface) die("xdg_wm_base_get_xdg_surface:");
-	xdg_surface_add_listener(xdg.surface, &surface_listener, NULL);
+	xdg_surface_add_listener(xdg.surface, &listener.xdg_surface, NULL);
 
 	xdg.toplevel = xdg_surface_get_toplevel(xdg.surface);
 	if (!xdg.toplevel) die("xdg_surface_get_toplevel:");
 
-	xdg_toplevel_add_listener(xdg.toplevel, &toplevel_listener, NULL);
+	xdg_toplevel_add_listener(xdg.toplevel, &listener.xdg_toplevel, NULL);
 	xdg_toplevel_set_title(xdg.toplevel, opt_title);
 	xdg_toplevel_set_app_id(xdg.toplevel, app_id);
 
@@ -1771,9 +1728,6 @@ void run(void)
 				timeout   = blinktimeout;
 			}
 		}
-
-		if (!swt.need_draw) continue;
-		swt.need_draw = false;
 
 		draw();
 		wl_display_flush(wl.display);
