@@ -365,12 +365,11 @@ void changealpha(const Arg *arg)
 {
 	float old = alpha;
 	alpha += arg->f;
-	alpha = MIN(alpha, 1.0);
-	alpha = MAX(alpha, 0.0);
+	LIMIT(alpha, 0.0, 1.0);
 
 	if (old == alpha) return;
-	xloadcols();
 	swt.need_draw = 1;
+	xloadcols();
 	redraw();
 }
 
