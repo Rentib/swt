@@ -184,6 +184,7 @@ typedef struct {
 	pixman_color_t *col;
 	size_t collen;
 	struct fcft_font *font[4];
+	struct fcft_font_options *font_options;
 	int fontsize;
 } DC;
 
@@ -673,8 +674,11 @@ void xloadfonts(const char *font, double fontsize)
 	}
 
 	/* TODO: use fontconfig for reading font from config */
-
-	fcft_set_scaling_filter(FCFT_SCALING_FILTER_LANCZOS3);
+	/* TODO: proper use of fcft font options */
+	if (!(dc.font_options = fcft_font_options_create()))
+		die("fcft_font_options_create:");
+	dc.font_options->scaling_filter     = FCFT_SCALING_FILTER_LANCZOS3;
+	dc.font_options->emoji_presentation = FCFT_EMOJI_PRESENTATION_DEFAULT;
 	snprintf(dpi, sizeof(dpi), "dpi=%d", wl.scale * 96);
 
 	for (i = 0; i < 4; i++) {
@@ -682,7 +686,8 @@ void xloadfonts(const char *font, double fontsize)
 		sprintf(attrs, "%s%s", dpi,
 			(const char *[]){"", ":weight=bold", ":slant=italic",
 					 ":weight=bold:slant=italic"}[i]);
-		dc.font[i] = fcft_from_name(1, (const char *[]){f}, attrs);
+		dc.font[i] = fcft_from_name2(1, (const char *[]){f}, attrs,
+					     dc.font_options);
 	}
 
 	usedfontsize = fontsize;
@@ -697,6 +702,7 @@ void xunloadfonts(void)
 	unsigned i;
 	for (i = 0; i < LEN(dc.font); i++)
 		if (dc.font[i]) fcft_destroy(dc.font[i]);
+	fcft_font_options_destroy(dc.font_options);
 }
 
 void xdrawunderline(Glyph g, int x, int y, struct fcft_font *f,
